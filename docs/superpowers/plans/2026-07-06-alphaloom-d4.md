@@ -31,6 +31,11 @@
 
 **基线排行榜**（spec §7）：`eval/leaderboard.py::leaderboard(blueprint_runs, baselines) -> Board`。基线：buy-and-hold、默认参数网格、随机参数。同表对比 net_pnl/return/max_dd/win_rate + **样本内-验证窗泛化差距**。Agent 必须证明打得过无脑基线（若打不过，如实展示——诚实传统）。
 
+> **D4-T3 实施注记（sanctioned deviations，控制器 T3 任务书已核准）**：
+> 1. **记分卡签名**定为 `scorecard(train_report, valid_report=None, *, ladder=None, cost_cert=None, ablation=None) -> Scorecard`（非 `(run_report, ladder?, ablation?)`）——泛化差距需要 train/valid 两段 report 才能算，cost_cert 未显式给则自动取 `train_report.certificate`。综合分权重为模块级常量（valid_performance 0.40 / generalization 0.25 / fidelity 0.20 / determinism 0.15），缺证据维度按 MISSING_EVIDENCE_SCORE=25 保守计并在 evidence_coverage 如实标注（缺证据=低证据分，不是满分）。
+> 2. **排行榜签名**定为 `leaderboard(entries) -> Board`，entry = `{name, train_report, valid_report?, kind: "blueprint"|"baseline"}`（蓝图与基线同构同表，不分两参）。行指标取排序窗口（valid 优先，无 valid 用 train 并标 `in_sample_only=true`），排序按 return_pct 降序、蓝图打不过基线如实垫底。
+> 3. **"默认参数网格"基线**落地为 `baseline_ema_default`（默认参数 ema_cross.loom 跑真实 run_backtest，纯确定性零 LLM）；"随机参数"落地为 `baseline_random` 随机进出场（固定 seed 可复现，certificate 披露 luck_baseline=True）。buy_hold 纯数值自算，fee 语义与 PaperBroker 一致（fee=qty×price×fee_rate 每腿收，全仓=含入场费打满）。三基线 certificate.llm_calls_per_bar=0。
+
 **委员会消融**（spec §7，D3 Carryover #1）：`eval/ablation.py::committee_ablation(base_blueprint, source, llm) -> AblationReport`。三臂：完整委员会 / 去风控官 / 去 RAG（require_citations）。同数据比较验证窗表现 + 风控官拦截的危险提案计数。**规模锁定**：3 臂 × 同一窗口，全程录制供离线回放。预期卖点：无风控官臂样本内更好看、验证窗更差——护栏价值量化。若结果相反如实发布。
 
 **进化实验室**（spec §6，"Agent 即研究员"终极形态）：`evolve/lab.py::evolve(seed_blueprint, source, llm, *, population=4, generations=3) -> Genealogy`。Agent 读回测报告→提出蓝图**变异**（参数/节点/连线，图 diff）→变异版过编译（**风控类型系统守门——变异不能绕风控**）→回测评估适应度→优者存活进下代→谱系树。本质遗传算法，变异算子是 LLM。**规模硬锁定**：种群≤4、代数≤3、适应度用样本内窗口+终选做验证窗打分（防过拟合，泄漏测试保障）。**降级保险丝**：只做参数变异不动图结构。全程录制。
