@@ -29,6 +29,7 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
     user_dir.mkdir(parents=True, exist_ok=True)
     app.state.service = service
     app.state.ws_queues = {}          # run_id -> list[asyncio.Queue]（Task 4 消费）
+    app.state.event_log = {}          # run_id -> list[event]（重放缓冲，20k 上限）
     app.state.loop = None
 
     @app.on_event("startup")
@@ -37,11 +38,13 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
 
     def _sink_for(run_id):
         def sink(event):
+            log = app.state.event_log.setdefault(run_id, [])
+            if len(log) < 20_000:
+                log.append(event)
             loop = app.state.loop
-            if loop is None:
-                return
-            for q in list(app.state.ws_queues.get(run_id, [])):
-                loop.call_soon_threadsafe(q.put_nowait, event)
+            if loop is not None:
+                for q in list(app.state.ws_queues.get(run_id, [])):
+                    loop.call_soon_threadsafe(q.put_nowait, event)
         return sink
 
     @app.get("/api/nodes")
@@ -194,6 +197,47 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         d = from_json(text)
         return {k: ({"as_of": v.as_of, "value": v.value}
                     if hasattr(v, "as_of") else v) for k, v in d.items()}
+
+    # —— WS（SPA 路由之前）——
+    @app.websocket("/ws/runs/{run_id}")
+    async def ws_run(ws: WebSocket, run_id: str):
+        await ws.accept()
+        # sink 从后台线程用 loop.call_soon_threadsafe 推事件——必须指向真正服务本连接的
+        # loop。TestClient 每个 websocket_connect 起独立 portal/新 loop（≠startup 的 loop），
+        # 故在此捕获运行中 loop；uvicorn 生产单 loop 下等价无害。
+        app.state.loop = asyncio.get_running_loop()
+        if store.get(run_id) is None:
+            await ws.close(code=4404)
+            return
+        q: asyncio.Queue = asyncio.Queue()
+        app.state.ws_queues.setdefault(run_id, []).append(q)
+        try:
+            for ev in list(app.state.event_log.get(run_id, [])):
+                await ws.send_json(ev)                      # 重放
+            while True:
+                recv = asyncio.create_task(ws.receive_json())
+                pull = asyncio.create_task(q.get())
+                done_set, pending = await asyncio.wait(
+                    {recv, pull}, return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+                if recv in done_set:
+                    try:
+                        msg = recv.result()
+                    except Exception:
+                        break
+                    cmd = msg.get("cmd")
+                    if cmd in ("resume", "step", "stop"):
+                        service.command(run_id, cmd)
+                if pull in done_set:
+                    ev = pull.result()
+                    await ws.send_json(ev)
+                    if ev["type"] in ("done", "error"):
+                        break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            app.state.ws_queues.get(run_id, []).remove(q)
 
     # SPA fallback（/api /ws 之外）
     @app.get("/{path:path}", include_in_schema=False)

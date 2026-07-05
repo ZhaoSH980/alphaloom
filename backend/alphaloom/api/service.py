@@ -98,12 +98,19 @@ class RunService:
     def _worker(self, run_id, bp, params, sink, bridge):
         sink = _safe_sink(sink)
         sink({"type": "status", "status": "running"})
+        source = None
         try:
             source = SQLiteMarketData(self.db_path)
             playback = params.get("playback_ms", 0) / 1000.0
+            ws_wait = params.get("ws_wait_ms", 0) / 1000.0
             want_break = bool(params.get("breakpoints"))
+            first = [True]
 
             def on_bar_event(payload):
+                if first[0]:
+                    first[0] = False
+                    if ws_wait > 0:
+                        time.sleep(ws_wait)   # 首个 bar 前给 WS 连接窗口
                 sink({"type": "bar", **payload})
                 if playback > 0:
                     time.sleep(playback)
@@ -133,4 +140,9 @@ class RunService:
             self.store.set_status(run_id, "failed", error=str(exc))
             sink({"type": "error", "message": str(exc)})
         finally:
+            if source is not None:
+                try:
+                    source.close()   # T3 复审前瞻：source 连接收尾
+                except Exception:
+                    pass
             self._bridges.pop(run_id, None)

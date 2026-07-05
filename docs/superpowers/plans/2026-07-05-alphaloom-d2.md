@@ -1229,6 +1229,8 @@ sink 侧同步改造（app.py `_sink_for`）：
 
 `schemas.py` RunIn 加 `ws_wait_ms: int = 0`；service `_worker` 在首个 bar 回调前 `time.sleep(params.get("ws_wait_ms", 0)/1000)`（实现：`on_bar_event` 闭包内用 `first` 标志）。BreakBridge 的 `stop` 语义已在 Task 2 落地（`_stopped=True` 永久放行）。
 
+**Sanctioned deviation（T4 实现期发现，2026-07-05）**：`ws_run` 顶部（`accept()` 之后）须加一行 `app.state.loop = asyncio.get_running_loop()`。原因：sink 从后台 run 线程用 `loop.call_soon_threadsafe(q.put_nowait, ...)` 推事件，必须调度到**真正服务本连接**的 event loop。starlette `TestClient` 每个 `websocket_connect` 会起独立 anyio portal + 新 loop，与 `@on_event("startup")` 里捕获的 loop 不是同一个——若沿用 startup loop，threadsafe 回调派到已死/错误的 loop，服务端 `q.get()` 永不唤醒 → WS 流事件全丢、`receive_json` 死锁。在 handler 内捕获运行中 loop 修复此问题；uvicorn 生产单 loop 下该赋值等价无害（幂等覆盖为同一 loop）。startup 的 `_grab_loop` 保留（首连接前的兜底，无害）。
+
 - [ ] **Step 4: 全量回归**
 
 Run: `cd backend && .venv/Scripts/python -m pytest -q`

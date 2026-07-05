@@ -19,3 +19,4 @@ class RunIn(BaseModel):
     fee_rate: float = 0.0005
     breakpoints: list[str] = Field(default_factory=list)
     playback_ms: int = 15
+    ws_wait_ms: int = 0

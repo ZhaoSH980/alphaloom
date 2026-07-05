@@ -48,3 +48,7 @@ class RunsStore:
                 " FROM runs ORDER BY created_ms DESC, run_id")
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    def close(self) -> None:
+        with self._lock:
+            self._db.close()
