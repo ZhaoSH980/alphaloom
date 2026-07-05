@@ -835,7 +835,20 @@ def test_nesting_depth_limit():
               "edges": []}
     r = compile_blueprint(loads_loom(json.dumps(bp)))
     assert not r.ok and any(e.code == "PARAM_INVALID" for e in r.errors)
+
+def test_garbage_port_mappings_become_compile_errors():
+    # 编译器对任何输入只返回 CompileError，绝不裸抛（可验证反馈环境的硬要求）
+    for bad_inputs in ({"x": "no_dot"}, {"x": "a.b.c"}, {"x": 42}, ["not", "a", "dict"]):
+        bp = {"id": "g", "name": "g",
+              "nodes": [{"id": "s", "type": "subgraph",
+                         "params": {"blueprint": INNER, "inputs": bad_inputs, "outputs": {}}}],
+              "edges": []}
+        r = compile_blueprint(loads_loom(json.dumps(bp)))
+        assert not r.ok, bad_inputs
+        assert any(e.code == "PARAM_INVALID" for e in r.errors), bad_inputs
 ```
+
+（`test_garbage_port_mappings_become_compile_errors` 与映射解析加固为 Task 5 审查后 sanctioned deviation：Critical C1——垃圾映射不得裸抛。）
 
 - [ ] **Step 2: 运行确认失败**
 
@@ -849,8 +862,12 @@ from alphaloom.graph.model import EdgeSpec, NodeSpec, PortRef, loads_loom
 
 _MAX_DEPTH = 8
 
-def _parse_ref_str(s: str) -> PortRef:
+def _parse_ref_str(s) -> PortRef:
+    if not isinstance(s, str) or s.count(".") != 1:
+        raise ValueError(f"expected 'node.port', got {s!r}")
     n, p = s.split(".")
+    if not n or not p:
+        raise ValueError(f"expected 'node.port', got {s!r}")
     return PortRef(n, p)
 
 def _expand_subgraphs(bp, depth=0):
@@ -869,7 +886,7 @@ def _expand_subgraphs(bp, depth=0):
         try:
             inner = loads_loom(_json.dumps(n.params["blueprint"]))
         except Exception as exc:
-            errors.append(CompileError("PARAM_INVALID", f"subgraph {n.id}: bad blueprint ({exc})",
+            errors.append(CompileError("PARAM_INVALID", f"subgraph {n.id}: bad blueprint ({exc!r})",
                                        node_id=n.id))
             continue
         inner, sub_errs = _expand_subgraphs(inner, depth + 1)
@@ -881,12 +898,20 @@ def _expand_subgraphs(bp, depth=0):
         edges.extend(EdgeSpec(PortRef(pre + e.src.node_id, e.src.port),
                               PortRef(pre + e.dst.node_id, e.dst.port), e.feedback)
                      for e in inner.edges)
-        for outer_port, ref in n.params.get("inputs", {}).items():
-            r = _parse_ref_str(ref)
-            in_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
-        for outer_port, ref in n.params.get("outputs", {}).items():
-            r = _parse_ref_str(ref)
-            out_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
+        try:
+            for outer_port, ref in n.params.get("inputs", {}).items():
+                r = _parse_ref_str(ref)
+                in_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
+            for outer_port, ref in n.params.get("outputs", {}).items():
+                r = _parse_ref_str(ref)
+                out_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
+        except (ValueError, AttributeError, TypeError) as exc:
+            errors.append(CompileError("PARAM_INVALID",
+                                       f"subgraph {n.id}: bad port mapping ({exc})",
+                                       node_id=n.id,
+                                       fix_hint="inputs/outputs must map port names to "
+                                                "'innerNode.port' strings."))
+            continue
     if errors:
         return None, errors
     for e in bp.edges:
@@ -2630,4 +2655,4 @@ git tag d1-complete
 9. D2 前端将复用 Hindsight 设计系统；Studio 画布节点分类颜色 = registry category（data/indicator/decision/risk/execution）。
 10. LLM 节点（D3）的 CostAnnotation 必须如实填写（llm_calls_per_bar≥1, deterministic=False），成本证书的可信度靠注解纪律维持；D3 加"注解审计"测试（LLM 类节点禁止声明 deterministic=True）。
 11. 因果类型系统 D1 交付**运行时守卫**（check_stamped + 恶意节点测试）；spec §3.1 提到的"编译器对窗口类操作做静态越界检查"排 D3（节点声明 lookback 元数据后编译器才有静态分析素材）——对外表述统一为"runtime-enforced, compiler-assisted"，不要吹成纯编译期。
-12. **Task 4 审查遗留（D3 增强项）**：①MISSING_INPUT 检查（未连接的必需输入编译报警）需先设计 optional-port 元数据（D3 LLM 节点有可选上下文口），一并做；②UNKNOWN_NODE_TYPE 的可用类型列表 `[:20]` 截断加 "(+N more)" 标记；③TYPE_MISMATCH 通用 fix_hint 可从 REGISTRY 反查产出该类型的节点列表；④BAD_PORT_REF 在节点缺失分支可列出已知节点 id。
+12. **Task 4 审查遗留（D3 增强项）**：①MISSING_INPUT 检查（未连接的必需输入编译报警）需先设计 optional-port 元数据（D3 LLM 节点有可选上下文口），一并做；②UNKNOWN_NODE_TYPE 的可用类型列表 `[:20]` 截断加 "(+N more)" 标记；③TYPE_MISMATCH 通用 fix_hint 可从 REGISTRY 反查产出该类型的节点列表；④BAD_PORT_REF 在节点缺失分支可列出已知节点 id；⑤子图深度超限错误可携带子图链路径定位（当前 node_id=None）。
