@@ -6,7 +6,8 @@ import NodeCard from "../components/NodeCard";
 import ErrorPanel, { type CompileError } from "../components/ErrorPanel";
 import CertPanel from "../components/CertPanel";
 import PausedInspector from "../components/PausedInspector";
-import { compileLoom, getBlueprint, getNodes, listBlueprints, saveBlueprint, startRun } from "../lib/api";
+import CopilotPanel, { type Preview } from "../components/CopilotPanel";
+import { compileLoom, getBlueprint, getNodes, getRun, listBlueprints, saveBlueprint, startRun } from "../lib/api";
 import { openRunSocket } from "../lib/ws";
 import { CATEGORY_COLORS, flowToLoom, loomToFlow, nextNodeId,
          type Loom, type NodeDef } from "../lib/loom";
@@ -29,6 +30,10 @@ export default function Studio() {
     status?: string; paused?: { node_id: string; ts: number; inputs: Record<string, unknown> } | null }>({});
   const sock = useRef<ReturnType<typeof openRunSocket> | null>(null);
   const glowTimer = useRef<number>();
+  // Copilot：预览态 + 选中节点 + 最近报告（optimize 读它）。
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [report, setReport] = useState<Record<string, unknown> | null>(null);
 
   const toggleBp = useCallback((id: string) => {
     setBps((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -42,6 +47,37 @@ export default function Studio() {
 
   const currentLoom = useCallback(() =>
     flowToLoom(nodes as never, edges as never, base), [nodes, edges, base]);
+
+  // —— Copilot diff 预览：派生渲染层，绝不 setNodes/setEdges，故不参与 structuralKey，
+  // 不触发编译（避免重蹈 D2 编译循环）。预览态下画布只读展示"将变什么"。 ——
+  const displayNodes = useMemo(() => {
+    if (!preview) return nodes;
+    const kind = preview.diff.nodeKind;
+    // 现有节点：打 diff 标记（removed/changed；added 属于新图，下面补）。
+    const marked = nodes.map((n) => ({ ...n,
+      data: { ...n.data, diff: kind[n.id] === "changed" || kind[n.id] === "removed"
+        ? kind[n.id] : undefined } }));
+    // 新增节点：来自预览 loom，用其 meta.positions 定位，绿高亮。
+    const existing = new Set(nodes.map((n) => n.id));
+    const pos = (preview.loom.meta?.positions ?? {}) as Record<string, { x: number; y: number }>;
+    const addable = loomToFlow(preview.loom, defs).nodes
+      .filter((fn) => kind[fn.id] === "added" && !existing.has(fn.id))
+      .map((fn) => ({ ...fn, position: pos[fn.id] ?? fn.position,
+        data: { ...fn.data, diff: "added" as const } }));
+    return [...marked, ...addable] as typeof nodes;
+  }, [preview, nodes, defs]);
+
+  const displayEdges = useMemo(() => {
+    if (!preview) return edges;
+    const pf = loomToFlow(preview.loom, defs);
+    // 预览态下展示新图的边（新增绿虚线），叠加当前边。去重按 handle 三元组。
+    const seen = new Set(edges.map((e) => `${e.source}|${e.sourceHandle}|${e.target}|${e.targetHandle}`));
+    const addedEdges = pf.edges
+      .filter((e) => !seen.has(`${e.source}|${e.sourceHandle}|${e.target}|${e.targetHandle}`))
+      .map((e) => ({ ...e, animated: true,
+        style: { stroke: "#34d399", strokeDasharray: "5 3" } }));
+    return [...edges, ...addedEdges] as typeof edges;
+  }, [preview, edges, defs]);
 
   // 结构签名：只含影响编译的字段（不含瞬态 blocked/active），做编译 effect 的闸门。
   const structuralKey = useMemo(
@@ -120,11 +156,12 @@ export default function Studio() {
     } catch { alert("bad JSON"); }
   }, [setNodes]);
 
-  const run = async () => {
+  const run = useCallback(async (loom?: Loom) => {
     sock.current?.close();               // 关旧连接，防重复 Run 泄漏 WS（T6 审查 Important）
-    const { run_id } = await startRun({ blueprint: currentLoom(), inst: "BTC-USDT-SWAP",
+    const { run_id } = await startRun({ blueprint: loom ?? currentLoom(), inst: "BTC-USDT-SWAP",
       bar: "1m", playback_ms: 15, ws_wait_ms: 300, breakpoints: [...bps] });
     setRunState({ id: run_id, status: "running" });
+    setReport(null);
     sock.current = openRunSocket(run_id, (ev) => {
       if (ev.type === "bar") {
         setRunState((s) => ({ ...s, bar: ev.idx, equity: ev.equity }));
@@ -138,13 +175,39 @@ export default function Studio() {
           { node_id: string; ts: number; inputs: Record<string, unknown> } }));
       } else if (ev.type === "done") {
         setRunState((s) => ({ ...s, status: "done", paused: null }));
+        getRun(run_id).then((r) => setReport((r.report as Record<string, unknown>) ?? null))
+          .catch(() => {});
       } else if (ev.type === "error") {
         setRunState((s) => ({ ...s, status: `error: ${ev.message}`, paused: null }));
       } else if (ev.type === "status") {
         setRunState((s) => ({ ...s, status: ev.status }));
       }
     });
-  };
+  }, [currentLoom, bps, setNodes]);
+
+  // —— Copilot 应用：把预览 loom 一次性落地画布（setNodes/setEdges 各一次，
+  // structuralKey 变一次 → 编译触发一次，非循环）。base 同步为新 loom 保证 roundtrip 一致。 ——
+  const applyPreview = useCallback((): Loom | null => {
+    if (!preview) return null;
+    const loom = preview.loom;
+    setBase(loom);
+    const f = loomToFlow(loom, defs);
+    setNodes(f.nodes.map((n) => ({ ...n, data: { ...n.data,
+      breakpoint: false, onToggleBreakpoint: toggleBp } })) as never);
+    setEdges(f.edges.map((e) => ({ ...e, animated: e.data.feedback,
+      style: e.data.feedback ? { strokeDasharray: "6 3" } : undefined })) as never);
+    setBps(new Set());
+    setPreview(null);
+    return loom;
+  }, [preview, defs, setNodes, setEdges, toggleBp]);
+
+  const onCopilotPreview = useCallback((p: Preview) => setPreview(p), []);
+  const onCopilotApply = useCallback(() => { applyPreview(); }, [applyPreview]);
+  const onCopilotDiscard = useCallback(() => setPreview(null), []);
+  const onCopilotApplyRun = useCallback(() => {
+    const loom = applyPreview();
+    if (loom) run(loom);          // 用刚落地的 loom 直接回测（不依赖异步 state）
+  }, [applyPreview, run]);
 
   const palette = useMemo(() => {
     const groups: Record<string, NodeDef[]> = {};
@@ -153,7 +216,7 @@ export default function Studio() {
   }, [defs]);
 
   return (
-    <div className="h-full grid grid-cols-[200px_1fr_280px] gap-2 p-2">
+    <div className="h-full grid grid-cols-[170px_1fr_260px_290px] gap-2 p-2">
       <aside className="panel p-2 overflow-auto space-y-3">
         {palette.map(([cat, list]) => (
           <div key={cat}>
@@ -177,13 +240,24 @@ export default function Studio() {
         </div>
       </aside>
       <section className="panel relative">
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}
-                   onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-                   onConnect={onConnect} onEdgeContextMenu={onEdgeContextMenu}
-                   onNodeDoubleClick={onNodeDoubleClick} fitView proOptions={{ hideAttribution: true }}>
+        {/* 预览态下画布只读展示 diff（onNodesChange/onConnect 挂空避免误编辑派生层）。 */}
+        <ReactFlow nodes={displayNodes} edges={displayEdges} nodeTypes={nodeTypes}
+                   onNodesChange={preview ? undefined : onNodesChange}
+                   onEdgesChange={preview ? undefined : onEdgesChange}
+                   onConnect={preview ? undefined : onConnect}
+                   onEdgeContextMenu={preview ? undefined : onEdgeContextMenu}
+                   onNodeDoubleClick={preview ? undefined : onNodeDoubleClick}
+                   onNodeClick={(_, n) => setSelectedNodeId(n.id)}
+                   onPaneClick={() => setSelectedNodeId(null)}
+                   fitView proOptions={{ hideAttribution: true }}>
           <Background color="#1e2a44" gap={24} />
           <Controls />
         </ReactFlow>
+        {preview && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded
+                          bg-loom-amber/20 text-loom-amber text-xs pointer-events-none">
+            {t("diffPreview")}
+          </div>)}
         <div className="absolute top-2 left-2 right-2 flex items-center gap-3 pointer-events-none">
           <span className={`w-2 h-2 rounded-full ${errors.length ? "bg-loom-red" : "bg-loom-green"}`} />
           <span className="text-xs text-slate-400">
@@ -196,7 +270,7 @@ export default function Studio() {
                 <a className="pointer-events-auto underline ml-2"
                    href={`#/terminal?run=${runState.id}`}>→ {t("terminal")}</a>)}
             </span>)}
-          <button onClick={run} disabled={!!errors.length || !nodes.length}
+          <button onClick={() => run()} disabled={!!errors.length || !nodes.length || !!preview}
                   className="pointer-events-auto ml-auto px-3 py-1 text-xs rounded bg-loom-gold/20 text-loom-gold disabled:opacity-30">
             ▶ {t("run")}
           </button>
@@ -212,6 +286,13 @@ export default function Studio() {
                 className="w-full px-2 py-1 text-xs rounded bg-loom-blue/20 text-loom-blue">
           {t("save")}
         </button>
+      </aside>
+      <aside className="min-h-0 overflow-hidden">
+        <CopilotPanel getCurrentLoom={currentLoom}
+                      onPreview={onCopilotPreview} onApply={onCopilotApply}
+                      onApplyRun={onCopilotApplyRun} onDiscard={onCopilotDiscard}
+                      preview={preview} selectedNodeId={selectedNodeId}
+                      runId={runState.id} report={report} />
       </aside>
     </div>
   );

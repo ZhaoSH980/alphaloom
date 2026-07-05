@@ -5,8 +5,15 @@ import { CATEGORY_COLORS, PIN_COLORS, type NodeDef, type PinType } from "../lib/
 export interface NodeCardData {
   def: NodeDef; params: Record<string, unknown>;
   active?: boolean; blocked?: boolean; breakpoint?: boolean;
+  diff?: "added" | "removed" | "changed";   // Copilot diff 预览高亮（绿/红/黄）
   onToggleBreakpoint?: (id: string) => void;
 }
+
+const DIFF_RING: Record<NonNullable<NodeCardData["diff"]>, string> = {
+  added: "0 0 0 2px #34d399, 0 0 14px 3px rgba(52,211,153,0.55)",
+  removed: "0 0 0 2px #ef4444, 0 0 14px 3px rgba(239,68,68,0.55)",
+  changed: "0 0 0 2px #fbbf24, 0 0 14px 3px rgba(251,191,36,0.55)",
+};
 
 function Pin({ side, port, pin, idx }: { side: "in" | "out"; port: string; pin: PinType; idx: number }) {
   const y = 34 + idx * 18;
@@ -26,8 +33,8 @@ export default function NodeCard({ id, data }: NodeProps) {
   const color = CATEGORY_COLORS[d.def.category] ?? "#64748b";
   const rows = Math.max(Object.keys(d.def.inputs).length, Object.keys(d.def.outputs).length);
   return (
-    <div className={`panel min-w-[170px] pb-2 ${d.active ? "node-glow" : ""} ${d.blocked ? "node-blocked" : ""}`}
-         style={{ minHeight: 40 + rows * 18 }}>
+    <div className={`panel min-w-[170px] pb-2 ${d.active ? "node-glow" : ""} ${d.blocked ? "node-blocked" : ""} ${d.diff === "removed" ? "opacity-60" : ""}`}
+         style={{ minHeight: 40 + rows * 18, boxShadow: d.diff ? DIFF_RING[d.diff] : undefined }}>
       <div className="flex items-center gap-2 px-2 py-1 rounded-t-lg"
            style={{ background: `${color}22`, borderBottom: `1px solid ${color}55` }}>
         <span className="w-2 h-2 rounded-full" style={{ background: color }} />
