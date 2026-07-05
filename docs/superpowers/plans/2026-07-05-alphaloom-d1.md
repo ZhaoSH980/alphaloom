@@ -2656,3 +2656,4 @@ git tag d1-complete
 10. LLM 节点（D3）的 CostAnnotation 必须如实填写（llm_calls_per_bar≥1, deterministic=False），成本证书的可信度靠注解纪律维持；D3 加"注解审计"测试（LLM 类节点禁止声明 deterministic=True）。
 11. 因果类型系统 D1 交付**运行时守卫**（check_stamped + 恶意节点测试）；spec §3.1 提到的"编译器对窗口类操作做静态越界检查"排 D3（节点声明 lookback 元数据后编译器才有静态分析素材）——对外表述统一为"runtime-enforced, compiler-assisted"，不要吹成纯编译期。
 12. **Task 4 审查遗留（D3 增强项）**：①MISSING_INPUT 检查（未连接的必需输入编译报警）需先设计 optional-port 元数据（D3 LLM 节点有可选上下文口），一并做；②UNKNOWN_NODE_TYPE 的可用类型列表 `[:20]` 截断加 "(+N more)" 标记；③TYPE_MISMATCH 通用 fix_hint 可从 REGISTRY 反查产出该类型的节点列表；④BAD_PORT_REF 在节点缺失分支可列出已知节点 id；⑤子图深度超限错误可携带子图链路径定位（当前 node_id=None）；⑥`CostAnnotation.__post_init__` 校验 latency_class 白名单与 llm_calls_per_bar>=0（注册期 fail-fast，Task 6 审查 Minor）。
+13. **Task 7 审查移交（D3 前处理）**：①`check_stamped` 深递归化（list/嵌套 dict/Stamped.value 内部）——D3 LLM 节点引入结构化端口值前必须做，D1 节点集下不可达故缓；②candle 以共享引用发给同波节点（BarEvent 浅冻结），恶意节点可原地篡改污染下游——Task 8 审查关注 CandleFeed 是否 emit copy。
