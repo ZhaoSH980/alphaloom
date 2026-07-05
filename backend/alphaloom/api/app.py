@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
@@ -45,8 +46,23 @@ def _build_llm_client(llm_db):
 
 def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_dir,
                frontend_dist, llm_client=None, llm_db=None) -> FastAPI:
-    app = FastAPI(title="AlphaLoom API")
     store = RunsStore(runs_db)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # startup：兜底抓 event loop（D2-T4：sink 从后台线程用
+        # loop.call_soon_threadsafe 推事件，需要一个 running loop 句柄）。这是兜底——
+        # 真正服务某 WS 连接时，ws_run handler 内会用连接期的 running loop 覆盖它
+        # （TestClient 每个 websocket_connect 起独立 portal/新 loop ≠ 此 startup loop，
+        # 那处覆盖是死锁修复的关键，不能删；uvicorn 生产单 loop 下二者等价无害）。
+        app.state.loop = asyncio.get_running_loop()
+        yield
+        # shutdown：关闭 RunsStore 的 sqlite 连接（连接 finalizer，避免 ResourceWarning
+        # 泄漏；D2 Carryover 9② / T3 前瞻）。
+        store.close()
+
+    app = FastAPI(title="AlphaLoom API", lifespan=lifespan)
+    app.state.store = store
     # LLM 注入接缝：预构建 llm_client（测试注入 fake transport 的 RecordingLLMClient）优先；
     # 否则从 env 构建生产客户端（offline 跟 ALPHALOOM_OFFLINE）。构建失败则 None。
     if llm_client is None:
@@ -58,11 +74,7 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
     app.state.service = service
     app.state.ws_queues = {}          # run_id -> list[asyncio.Queue]（Task 4 消费）
     app.state.event_log = {}          # run_id -> list[event]（重放缓冲，20k 上限）
-    app.state.loop = None
-
-    @app.on_event("startup")
-    async def _grab_loop():
-        app.state.loop = asyncio.get_running_loop()
+    app.state.loop = None             # lifespan startup 兜底抓；ws_run 内按连接覆盖
 
     def _sink_for(run_id):
         def sink(event):
@@ -258,6 +270,10 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             raise HTTPException(422, {"error": "generation_failed", "message": str(exc)})
 
     # —— Text-to-Node 沙箱注册（AST 白名单，热注册进全局 REGISTRY）——
+    # 命名空间假设（单用户，D4 Carryover）：REGISTRY 是进程级全局，注册的自定义
+    # 节点跨请求/跨 create_app 实例/跨用户可见——本端点无 session 隔离。AlphaLoom
+    # 当前是单用户本地/演示部署，此语义可接受（详见 nodes/registry.py 模块 docstring）。
+    # 多用户生产部署需按 session/租户命名空间注册（D4 Carryover：并入沙箱资源限额批次）。
     @app.post("/api/nodes/custom")
     def custom_node(body: CustomNodeIn):
         result = compile_node_source(body.source)

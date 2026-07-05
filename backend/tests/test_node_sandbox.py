@@ -350,6 +350,111 @@ class LoopOkNode:
 
 
 # ---------------------------------------------------------------------------
+# 循环上限加固（D4 Carryover 3/9①）：算术传播 + AugAssign 绕过必须也拦。
+#
+# D3 只拦已知常量绑定的 range；算术传播（n=50000; m=n*3; range(m)）和
+# AugAssign（n=0; n+=500000; range(n)）绕过 MAX_RANGE。D4 加固：追踪简单算术
+# 传播（tracked const 的 BinOp）+ AugAssign 更新常量表，堵这两条 CPU-per-bar DoS。
+# ---------------------------------------------------------------------------
+
+def test_arithmetic_propagation_range_capped():
+    """n=50000; m=n*3; range(m) —— m=150000 经算术传播超限，必须拦（D3 绕过）。"""
+    src = "n = 50000\nm = n * 3\nfor _ in range(m):\n    pass\n"
+    result = compile_node_source(src)
+    assert isinstance(result, SandboxError), f"expected SandboxError, got {result!r}"
+    assert result.reason == "loop_bound"
+
+
+def test_augassign_range_capped():
+    """n=0; n+=500000; range(n) —— AugAssign 累加超限，必须拦（D3 绕过）。"""
+    src = "n = 0\nn += 500000\nfor _ in range(n):\n    pass\n"
+    result = compile_node_source(src)
+    assert isinstance(result, SandboxError), f"expected SandboxError, got {result!r}"
+    assert result.reason == "loop_bound"
+
+
+def test_arithmetic_propagation_direct_range_call_capped():
+    """range(m) 作为直接 Call（非 for 迭代）也须拦——m 由算术传播超限。"""
+    src = "n = 40000\nm = n * 4\nx = list(range(m))\n"
+    result = compile_node_source(src)
+    assert isinstance(result, SandboxError), f"expected SandboxError, got {result!r}"
+    assert result.reason == "loop_bound"
+
+
+def test_small_arithmetic_propagation_allowed():
+    """小的算术传播（n=10; m=n*2; range(m)=20）应放行——不误伤合法小 range。"""
+    src = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="loop_arith_ok", category="indicator",
+      inputs={"candle": PinType.CANDLE}, outputs={"value": PinType.SERIES},
+      cost=CostAnnotation(deterministic=True))
+class LoopArithOkNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        n = 5
+        m = n * 2
+        total = 0.0
+        for i in range(m):
+            total += i
+        return {"value": total}
+'''
+    d = compile_node_source(src)
+    assert not isinstance(d, SandboxError), getattr(d, "message", d)
+
+
+def test_small_augassign_allowed():
+    """小的 AugAssign（n=10; n+=5; range(n)=15）应放行——不误伤。"""
+    src = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="loop_aug_ok", category="indicator",
+      inputs={"candle": PinType.CANDLE}, outputs={"value": PinType.SERIES},
+      cost=CostAnnotation(deterministic=True))
+class LoopAugOkNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        n = 10
+        n += 5
+        total = 0.0
+        for i in range(n):
+            total += i
+        return {"value": total}
+'''
+    d = compile_node_source(src)
+    assert not isinstance(d, SandboxError), getattr(d, "message", d)
+
+
+def test_augassign_untracks_on_unknown_operand():
+    """AugAssign 用未知量（n += param）→ n 变未知，从常量表移除，range(n) 保守放行
+    （运行时 builtins 受限无逃逸面；不误伤合法 range(param) 式用法）。"""
+    src = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="loop_aug_unknown", category="indicator",
+      inputs={"candle": PinType.CANDLE}, outputs={"value": PinType.SERIES},
+      cost=CostAnnotation(deterministic=True))
+class LoopAugUnknownNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        n = 10
+        n += int(inputs["candle"]["close"])
+        total = 0.0
+        for i in range(n):
+            total += i
+        return {"value": total}
+'''
+    d = compile_node_source(src)
+    assert not isinstance(d, SandboxError), getattr(d, "message", d)
+
+
+# ---------------------------------------------------------------------------
 # 降级保险丝：受限模板版（LLM 只填参数，不写自由代码）
 # ---------------------------------------------------------------------------
 

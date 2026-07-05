@@ -192,19 +192,96 @@ class _Validator(ast.NodeVisitor):
         # 被当"未知上界"保守拒（见 _check_range）。
         self._const_ints: dict[str, int] = {}
 
+    def _eval_const_int(self, expr) -> int | None:
+        """尝试把表达式在已知整数常量表上静态求值为 int，失败返回 None。
+
+        覆盖：整数字面量、跟踪到的常量名、以及二者上的简单算术传播
+        （BinOp of tracked consts，如 ``n*3`` / ``n+500000`` / ``n<<10``）与
+        一元 +/-。这样 ``n=50000; m=n*3; range(m)`` 的 m=150000 也能算出并受
+        MAX_RANGE 限制（D4 Carryover 3/9①：算术传播绕过加固）。任何未知量
+        （param、函数调用结果、非整数）出现即返回 None → 保守当"未知上界"。
+        """
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, int) \
+                and not isinstance(expr.value, bool):
+            return expr.value
+        if isinstance(expr, ast.Name):
+            return self._const_ints.get(expr.id)
+        if isinstance(expr, ast.UnaryOp):
+            operand = self._eval_const_int(expr.operand)
+            if operand is None:
+                return None
+            if isinstance(expr.op, ast.USub):
+                return -operand
+            if isinstance(expr.op, ast.UAdd):
+                return operand
+            return None
+        if isinstance(expr, ast.BinOp):
+            left = self._eval_const_int(expr.left)
+            right = self._eval_const_int(expr.right)
+            if left is None or right is None:
+                return None
+            try:
+                if isinstance(expr.op, ast.Add):
+                    return left + right
+                if isinstance(expr.op, ast.Sub):
+                    return left - right
+                if isinstance(expr.op, ast.Mult):
+                    return left * right
+                if isinstance(expr.op, ast.FloorDiv):
+                    return left // right if right != 0 else None
+                if isinstance(expr.op, ast.Mod):
+                    return left % right if right != 0 else None
+                if isinstance(expr.op, ast.Pow):
+                    # 指数上界防御：巨大指数（10**9）也应被 MAX_RANGE 拦，但先防
+                    # 天量幂运算本身炸内存——指数 > 64 一律视为"超大未知"直接给
+                    # 一个必超限的哨兵值（不真算）。
+                    if right > 64 or right < 0:
+                        return MAX_RANGE + 1
+                    return left ** right
+                if isinstance(expr.op, ast.LShift):
+                    if right > 64 or right < 0:
+                        return MAX_RANGE + 1
+                    return left << right
+                if isinstance(expr.op, ast.RShift):
+                    return left >> right if right >= 0 else None
+            except (ValueError, OverflowError, ZeroDivisionError):
+                return None
+        return None
+
     def _record_const_binding(self, target, value) -> None:
         if not isinstance(target, ast.Name):
             return
-        if isinstance(value, ast.Constant) and isinstance(value.value, int) \
-                and not isinstance(value.value, bool):
-            self._const_ints[target.id] = value.value
+        evaluated = self._eval_const_int(value)
+        if evaluated is not None:
+            self._const_ints[target.id] = evaluated
         else:
-            # 名字被赋成非整数常量 → 其值未知，从常量表移除（后续作 range 上界保守拒）
+            # 名字被赋成未知（非整数 / 含未知量的算术）→ 其值未知，从常量表移除
+            # （后续作 range 上界保守拒或放行，见 _check_range）
             self._const_ints.pop(target.id, None)
 
     def visit_Assign(self, node_obj: ast.Assign) -> None:
         for tgt in node_obj.targets:
             self._record_const_binding(tgt, node_obj.value)
+        self.generic_visit(node_obj)
+
+    def visit_AugAssign(self, node_obj: ast.AugAssign) -> None:
+        """AugAssign（``n += 500000``）更新常量表——否则累加超限绕过 MAX_RANGE
+        （D4 Carryover 3/9①：AugAssign 绕过加固）。等价于 ``n = n <op> value``。"""
+        tgt = node_obj.target
+        if isinstance(tgt, ast.Name):
+            current = self._const_ints.get(tgt.id)
+            if current is not None:
+                # 构造等价 BinOp（current <op> value）在常量表上求值
+                synthetic = ast.BinOp(
+                    left=ast.Constant(value=current), op=node_obj.op,
+                    right=node_obj.value)
+                evaluated = self._eval_const_int(synthetic)
+                if evaluated is not None:
+                    self._const_ints[tgt.id] = evaluated
+                else:
+                    # n += <未知量> → n 变未知，从常量表移除（range(n) 保守放行）
+                    self._const_ints.pop(tgt.id, None)
+            # current is None（本就未跟踪）→ 保持未跟踪
         self.generic_visit(node_obj)
 
     def generic_visit(self, node_obj: ast.AST) -> None:
@@ -299,40 +376,17 @@ class _Validator(ast.NodeVisitor):
 
     def _check_range(self, call: ast.Call) -> None:
         for arg in call.args:
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, int):
-                if arg.value > MAX_RANGE:
-                    _reject(
-                        call,
-                        f"range bound {arg.value} exceeds sandbox limit {MAX_RANGE}",
-                        "loop_bound",
-                    )
-            elif isinstance(arg, ast.UnaryOp) and isinstance(arg.op, ast.USub):
-                pass  # 负数 range → 空迭代，无害
-            elif isinstance(arg, ast.BinOp):
-                # 如 10**9 —— 拒绝非字面量常数的大界估算太脆弱：保守拒非常量上界。
+            # 静态求值：字面量、跟踪常量名、算术传播（BinOp/UnaryOp of tracked
+            # consts）统一走 _eval_const_int。能算出整数则套 MAX_RANGE；算不出
+            # （param / len(x) / 未知量）→ 保守放行（运行时受限 builtins 无逃逸面，
+            # 仅 CPU-per-bar 有界，且纯计算常见 range(len(...)) 不误伤）。
+            bound = self._eval_const_int(arg)
+            if bound is not None and bound > MAX_RANGE:
                 _reject(
                     call,
-                    "range() bound must be a small integer literal in sandbox",
+                    f"range bound {bound} exceeds sandbox limit {MAX_RANGE}",
                     "loop_bound",
                 )
-            elif isinstance(arg, ast.Name):
-                # 变量绑定上界（`n = 500000; range(n)`）——查常量表，绕过字面量检查
-                # 的大界一样拦。名字若被赋成已知整数常量则套 MAX_RANGE 上限；未知名
-                # 字（如 range(len(x)) 的 len 结果不会走这里；range(param)）保守放行
-                # ——运行时受限 builtins 无逃逸面。
-                bound = self._const_ints.get(arg.id)
-                if bound is not None and bound > MAX_RANGE:
-                    _reject(
-                        call,
-                        f"range bound {arg.id}={bound} exceeds sandbox limit {MAX_RANGE}",
-                        "loop_bound",
-                    )
-            elif isinstance(arg, ast.Constant):
-                pass
-            else:
-                # 其余表达式上界（如 range(len(x))）——运行时无 __builtins__ 逃逸，
-                # 保守放行（纯计算常见 range(len(...))）。
-                pass
 
 
 def _validate(tree: ast.AST) -> SandboxError | None:

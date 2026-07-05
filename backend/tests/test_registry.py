@@ -31,3 +31,42 @@ def test_unknown_type():
 def test_duplicate_registration_rejected():
     with pytest.raises(ValueError, match="already registered"):
         node(type="t_add", category="test", inputs={}, outputs={})(AddNode)
+
+
+def test_registry_is_process_global_single_user():
+    """命名空间语义锁定（D4 Carryover 文档化）：REGISTRY 是进程级全局单例。
+
+    自定义节点热注册后跨请求/跨 create_app 实例/跨用户可见——**单用户假设**。
+    此测试锁定当前语义：沙箱编译注册一个节点后，它对同进程内任何 REGISTRY
+    读者（含另起的 create_app）即刻可见，直到显式清理。多用户部署需 session
+    命名空间（D4 Carryover），届时此测试须更新。
+    """
+    from alphaloom.sandbox.node_sandbox import compile_node_source
+    from alphaloom.sandbox.errors import SandboxError
+
+    type_name = "t_process_global_probe"
+    src = f'''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="{type_name}", category="indicator",
+      inputs={{"candle": PinType.CANDLE}}, outputs={{"value": PinType.SERIES}},
+      cost=CostAnnotation(deterministic=True))
+class ProcessGlobalProbe:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        return {{"value": 1.0}}
+'''
+    assert type_name not in REGISTRY
+    try:
+        d = compile_node_source(src)
+        assert not isinstance(d, SandboxError), getattr(d, "message", d)
+        # 单用户假设：注册即对进程级 REGISTRY 的所有读者可见（跨请求/用户/app）。
+        assert type_name in REGISTRY
+        assert get_node_def(type_name).type == type_name
+        # 重名再注册 → ValueError（进程级命名空间无 session 隔离，撞车但不静默覆盖）。
+        with pytest.raises(ValueError, match="already registered"):
+            node(type=type_name, category="indicator", inputs={}, outputs={})(AddNode)
+    finally:
+        REGISTRY.pop(type_name, None)
