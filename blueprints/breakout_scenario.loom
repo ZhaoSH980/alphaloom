@@ -1,0 +1,24 @@
+{
+  "id": "breakout_scenario_v1",
+  "name": "Breakout Scenario Machine",
+  "nodes": [
+    {"id": "feed", "type": "candle_feed", "params": {"inst": "BTC-USDT-SWAP", "bar": "1m"}},
+    {"id": "atr", "type": "atr", "params": {"period": 14}},
+    {"id": "scenario", "type": "scenario_gate", "params": {"lookback": 30, "cooldown": 10, "atr_mult": 2.5}},
+    {"id": "sizer", "type": "position_sizer", "params": {"risk_pct": 0.01}},
+    {"id": "risk", "type": "risk_gate", "params": {"max_qty": 100.0, "require_stop": true}},
+    {"id": "exec", "type": "execute_order", "params": {}},
+    {"id": "kill", "type": "kill_switch", "params": {"max_drawdown_pct": 0.2}}
+  ],
+  "edges": [
+    {"from": "feed.out", "to": "atr.candle"},
+    {"from": "feed.out", "to": "scenario.candle"},
+    {"from": "atr.value", "to": "scenario.atr"},
+    {"from": "scenario.signal", "to": "sizer.signal"},
+    {"from": "feed.out", "to": "sizer.candle"},
+    {"from": "sizer.sized", "to": "risk.signal"},
+    {"from": "risk.stamped", "to": "exec.signal"},
+    {"from": "feed.out", "to": "kill.candle"}
+  ],
+  "meta": {"preset": true, "description_zh": "30 根区间突破 + 冷却期状态机（Trade-Tools 场景机血统）"}
+}

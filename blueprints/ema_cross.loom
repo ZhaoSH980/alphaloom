@@ -1,0 +1,30 @@
+{
+  "id": "ema_cross_v1",
+  "name": "EMA Cross Trend Follow",
+  "nodes": [
+    {"id": "feed", "type": "candle_feed", "params": {"inst": "BTC-USDT-SWAP", "bar": "1m"}},
+    {"id": "ema_fast", "type": "ema", "params": {"period": 12}},
+    {"id": "ema_slow", "type": "ema", "params": {"period": 26}},
+    {"id": "atr", "type": "atr", "params": {"period": 14}},
+    {"id": "cross", "type": "cross_signal", "params": {"atr_mult": 2.0}},
+    {"id": "sizer", "type": "position_sizer", "params": {"risk_pct": 0.02}},
+    {"id": "risk", "type": "risk_gate", "params": {"max_qty": 100.0, "require_stop": true}},
+    {"id": "exec", "type": "execute_order", "params": {}},
+    {"id": "kill", "type": "kill_switch", "params": {"max_drawdown_pct": 0.25}}
+  ],
+  "edges": [
+    {"from": "feed.out", "to": "ema_fast.candle"},
+    {"from": "feed.out", "to": "ema_slow.candle"},
+    {"from": "feed.out", "to": "atr.candle"},
+    {"from": "ema_fast.value", "to": "cross.fast"},
+    {"from": "ema_slow.value", "to": "cross.slow"},
+    {"from": "feed.out", "to": "cross.candle"},
+    {"from": "atr.value", "to": "cross.atr"},
+    {"from": "cross.signal", "to": "sizer.signal"},
+    {"from": "feed.out", "to": "sizer.candle"},
+    {"from": "sizer.sized", "to": "risk.signal"},
+    {"from": "risk.stamped", "to": "exec.signal"},
+    {"from": "feed.out", "to": "kill.candle"}
+  ],
+  "meta": {"preset": true, "description_zh": "EMA 金叉死叉趋势跟随（止损=ATR×2，风险额 2%）"}
+}
