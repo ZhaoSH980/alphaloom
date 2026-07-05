@@ -8,7 +8,7 @@
 // 诚实：winner 的 valid num_trades 摆在 valid_fitness 旁（T5 审查：区分"没交易"
 // vs"交易亏光"——0 交易 = 0 分是零证据，不是真亏）。
 import { useMemo } from "react";
-import { ReactFlow, Background, Controls, type Edge, type Node } from "@xyflow/react";
+import { ReactFlow, Background, Controls, Handle, Position, type Edge, type Node } from "@xyflow/react";
 import type { Genealogy, GenealogyNode, CompileStatus } from "../lib/eval";
 import { useLang } from "../lib/i18n";
 
@@ -58,6 +58,13 @@ function GenealogyNodeCard({ data }: { data: { gnode: GenealogyNode; isWinner: b
     <div className="rounded px-2 py-1.5 text-[10px] w-[200px] bg-panel"
          style={{ border: `1px solid ${isWinner ? "#f59e0b" : sc.border}`,
                   boxShadow: isWinner ? "0 0 10px 1px rgba(245,158,11,0.5)" : undefined }}>
+      {/* React Flow 边靠 Handle 锚定：自定义节点必须自渲染 target/source Handle，
+          否则 parent→child 连线无锚点、整棵树只剩散落的框（T10 live 走查抓到）。
+          布局左→右（gen 递增），故 target 在左（接父）、source 在右（连子）。 */}
+      <Handle type="target" position={Position.Left} isConnectable={false}
+              style={{ opacity: 0, width: 1, height: 1, border: "none", minWidth: 0, minHeight: 0 }} />
+      <Handle type="source" position={Position.Right} isConnectable={false}
+              style={{ opacity: 0, width: 1, height: 1, border: "none", minWidth: 0, minHeight: 0 }} />
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className="font-mono text-slate-300">{n.id}</span>
         {isWinner && <span className="px-1 rounded bg-loom-gold/25 text-loom-gold text-[9px]">★</span>}

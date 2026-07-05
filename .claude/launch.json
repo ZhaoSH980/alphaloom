@@ -1,8 +1,13 @@
 {
   "version": "0.0.1",
   "configurations": [
+    { "name": "alphaloom-offline", "runtimeExecutable": "backend/.venv/Scripts/python",
+      "runtimeArgs": ["-m", "uvicorn", "alphaloom.serve:app", "--port", "8100", "--app-dir", "backend"],
+      "env": { "ALPHALOOM_OFFLINE": "1" },
+      "port": 8100 },
     { "name": "alphaloom-api", "runtimeExecutable": "backend/.venv/Scripts/python",
       "runtimeArgs": ["-m", "uvicorn", "alphaloom.serve:app", "--port", "8000", "--app-dir", "backend"],
+      "env": { "ALPHALOOM_OFFLINE": "1" },
       "port": 8000 },
     { "name": "alphaloom-web", "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "frontend"], "port": 5173 }
