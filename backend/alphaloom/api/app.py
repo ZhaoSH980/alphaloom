@@ -9,22 +9,50 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 import alphaloom.nodes  # noqa: F401
 from alphaloom.api.runs_store import RunsStore
-from alphaloom.api.schemas import CompileIn, RunIn, SaveBlueprintIn
+from alphaloom.api.schemas import (CompileIn, CopilotBlueprintIn, CopilotExplainIn,
+                                   CopilotOptimizeIn, CustomNodeIn, RunIn, SaveBlueprintIn)
 from alphaloom.api.serialize import sanitize
 from alphaloom.api.service import RunService
+from alphaloom.copilot import blueprint as copilot
 from alphaloom.data.source import bar_to_ms
 from alphaloom.graph.compiler import compile_blueprint
 from alphaloom.graph.model import dumps_loom, loads_loom
 from alphaloom.nodes.registry import REGISTRY
 from alphaloom.runtime.recorder import from_json
+from alphaloom.sandbox.errors import SandboxError
+from alphaloom.sandbox.node_sandbox import compile_node_source
 
 _BARS = ["1m", "5m", "15m", "1H", "4H", "1D"]
 
+def _build_llm_client(llm_db):
+    """从 env 构建生产 RecordingLLMClient：LLMConfig.from_env + openai_transport
+    + with_retry（429 退避），offline 跟 ALPHALOOM_OFFLINE。llm_db=None → data/llm_calls.sqlite。
+
+    构建失败（如非 offline 且缺 .env 配置）返回 None——LLM 节点缺席的 D1/D2 蓝图照跑，
+    LLM 节点在场时 ctx.llm is None 会抛清晰 RuntimeError → run failed（不崩服务）。
+    """
+    from alphaloom.llm.client import LLMConfig, openai_transport
+    from alphaloom.llm.recording import RecordingLLMClient
+    from alphaloom.llm.retry import with_retry
+    try:
+        cfg = LLMConfig.from_env()
+    except KeyError:
+        return None   # 未配置 .env 且非 offline —— 无 LLM 客户端（LLM 节点会 run failed）
+    db = Path(llm_db) if llm_db is not None else Path("data") / "llm_calls.sqlite"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    transport = with_retry(openai_transport(cfg))
+    return RecordingLLMClient(transport, db, model=cfg.model)
+
 def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_dir,
-               frontend_dist) -> FastAPI:
+               frontend_dist, llm_client=None, llm_db=None) -> FastAPI:
     app = FastAPI(title="AlphaLoom API")
     store = RunsStore(runs_db)
-    service = RunService(store=store, db_path=db_path, record_dir=record_dir)
+    # LLM 注入接缝：预构建 llm_client（测试注入 fake transport 的 RecordingLLMClient）优先；
+    # 否则从 env 构建生产客户端（offline 跟 ALPHALOOM_OFFLINE）。构建失败则 None。
+    if llm_client is None:
+        llm_client = _build_llm_client(llm_db)
+    app.state.llm = llm_client
+    service = RunService(store=store, db_path=db_path, record_dir=record_dir, llm=llm_client)
     user_dir = Path(user_blueprints_dir)
     user_dir.mkdir(parents=True, exist_ok=True)
     app.state.service = service
@@ -197,6 +225,45 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         d = from_json(text)
         return {k: ({"as_of": v.as_of, "value": v.value}
                     if hasattr(v, "as_of") else v) for k, v in d.items()}
+
+    def _require_llm():
+        llm = app.state.llm
+        if llm is None:
+            raise HTTPException(
+                503, "no LLM client configured; set LLM_BASE_URL/LLM_API_KEY/LLM_MODEL "
+                     "in .env or ALPHALOOM_OFFLINE=1 with recorded calls")
+        return llm
+
+    # —— Copilot 元 Agent 端点（Text-to-Blueprint / explain / optimize）——
+    @app.post("/api/copilot/blueprint")
+    def copilot_blueprint(body: CopilotBlueprintIn):
+        llm = _require_llm()
+        try:
+            # text_to_blueprint 自带 default_compile_fn（真 compile_blueprint）+ 自修复循环
+            return copilot.text_to_blueprint(body.nl, REGISTRY, llm)
+        except copilot.BlueprintGenerationError as exc:
+            raise HTTPException(422, {"error": "generation_failed", "message": str(exc)})
+
+    @app.post("/api/copilot/explain")
+    def copilot_explain(body: CopilotExplainIn):
+        llm = _require_llm()
+        return {"explanation": copilot.explain(body.blueprint, llm)}
+
+    @app.post("/api/copilot/optimize")
+    def copilot_optimize(body: CopilotOptimizeIn):
+        llm = _require_llm()
+        try:
+            return copilot.optimize(body.blueprint, body.report, llm, defs=REGISTRY)
+        except copilot.BlueprintGenerationError as exc:
+            raise HTTPException(422, {"error": "generation_failed", "message": str(exc)})
+
+    # —— Text-to-Node 沙箱注册（AST 白名单，热注册进全局 REGISTRY）——
+    @app.post("/api/nodes/custom")
+    def custom_node(body: CustomNodeIn):
+        result = compile_node_source(body.source)
+        if isinstance(result, SandboxError):
+            raise HTTPException(422, result.to_dict())   # {reason, message, lineno}
+        return {"type": result.type, "category": result.category}
 
     # —— WS（SPA 路由之前）——
     @app.websocket("/ws/runs/{run_id}")

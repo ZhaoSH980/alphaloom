@@ -65,10 +65,13 @@ def _safe_sink(sink):
     return safe
 
 class RunService:
-    def __init__(self, store, db_path, record_dir):
+    def __init__(self, store, db_path, record_dir, llm=None):
         self.store = store
         self.db_path = db_path
         self.record_dir = record_dir
+        # 注入的 RecordingLLMClient（None → D2 行为：LLM 节点缺席时零影响，
+        # LLM 节点在场时 on_bar 会因 ctx.llm is None 抛清晰 RuntimeError → run failed）。
+        self.llm = llm
         self._threads: dict[str, threading.Thread] = {}
         self._bridges: dict[str, BreakBridge] = {}
 
@@ -123,7 +126,8 @@ class RunService:
                 record_dir=self.record_dir, run_id=run_id,
                 breakpoints="all" if want_break else None,
                 on_pause=bridge.on_pause if want_break else None,
-                on_bar=on_bar_event)
+                on_bar=on_bar_event,
+                llm=self.llm)   # LLM 注入接缝：run 拿到注入的 RecordingLLMClient
             status = "halted" if report.summary.get("halted") else "completed"
             payload = {"run_id": report.run_id, "blueprint_id": report.blueprint_id,
                        "bars": report.bars, "summary": sanitize(report.summary),
