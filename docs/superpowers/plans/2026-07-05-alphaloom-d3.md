@@ -292,3 +292,8 @@ nodes/llm_nodes.py：LLMAnalystNode（type=llm_analyst, category=decision, input
 9. 沙箱运行期 DoS 残留（T7 红队复审，D4）：①算术传播/AugAssign 上界绕过 MAX_RANGE（`m=n*3;range(m)`、`n+=500000`）——运行时 builtins 受限无逃逸面，仅 CPU-per-bar 有界 DoS，与完整资源限额一并 D4；②`compile_node_source` 未校验 outputs/inputs 值必须是真 PinType——`outputs={'stamped':[RSS]}`（list）能注册、引用时 `compiler.py t_out.value` 崩 AttributeError（非伪造逃逸，list 身份≠enum 连不到 execute_order，仅潜在编译期崩溃）——@node 装饰器或沙箱应校验 pin 值类型。
 10. **T8 审查提前修（pull-forward，非 D4）**：carryover 9② 的非 PinType 输出值经 T8 的 POST /api/nodes/custom 变成网络可达跨用户持久 DoS——仅注册一个 `outputs={'v':[PinType.SERIES]}`（list）畸形节点就让 /api/nodes（app.py `{k:v.value}`）与 /api/compile 对所有后续调用者 500，进程级 REGISTRY 持久污染。修复：`compile_node_source` 注册后（与 forge_risk_stamp 同处）校验 NodeDef 的 inputs/outputs 每个值都是真 `PinType` 实例，否则回滚+SandboxError(reason=`bad_pin_type`)。
 11. **registry 命名空间（D4 carryover）**：进程级 REGISTRY 使自定义节点跨用户/跨 create_app 可见（多用户互相看到、重名 422 exec_error 优雅但污染）——D4 节点市场需按会话命名空间注册（并入 carryover 3 资源限额）。
+
+## T11 真实录制决策（用户 2026-07-05 拍板：用真实讯飞 Spark key 录）
+- 真实讯飞配置（Hindsight .env 同源）：model=`astron-code-latest`，base_url=xf-yun 编码 API。**OFFLINE_DEFAULTS model 必须从 `spark-x1` 改 `astron-code-latest`**（sanctioned，llm/client.py）——录制 key 嵌 model 串，不改则离线 replay 全 miss。
+- 真实录制是**控制器任务**（涉及用户密钥+付费调用）：①T11 fake-seed 基础设施先落地（seed_recordings.py 结构/demo 蓝图/gitignore 例外/离线验证 harness 可复用）②控制器建 alphaloom/.env（copy hindsight/.env，gitignore 绝不入库）③真实 transport 跑 seed，**窗口要小**（committee=3 调用/bar，控制在少量 bar，429 耐心退避 15/30/60s）④验证 ALPHALOOM_OFFLINE=1 全命中零配额⑤提交 llm_calls.sqlite（gitignore 例外）不提交 .env⑥密钥扫描确认零泄漏。
+- 面试叙事：录制来自真实讯飞 astron-code-latest 调用，离线路径零配额回放逐字节一致（Hindsight 同款诚实模式）；插自己 key 可 re-record/走 live。
