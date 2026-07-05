@@ -1,0 +1,70 @@
+name: CI
+
+# Offline / deterministic only: the backend tests inject a scripted fake LLM (pure
+# local functions, zero network) and ALPHALOOM_OFFLINE=1 forces record/replay, so CI
+# never touches a real LLM endpoint and burns zero quota. No secrets are needed.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (pytest, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    env:
+      ALPHALOOM_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (with dev extras)
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run pytest
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    name: frontend (tsc + vitest + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Unit tests (vitest)
+        working-directory: frontend
+        run: npm test
+
+      - name: Type-check + build (tsc -b && vite build)
+        working-directory: frontend
+        run: npm run build
