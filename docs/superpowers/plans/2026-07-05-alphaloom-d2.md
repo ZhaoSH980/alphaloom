@@ -2314,6 +2314,52 @@ git tag d2-complete
 
 ---
 
+### Task 9: 实况走查缺陷修复（控制器 T8 走查发现）
+
+控制器亲自 preview 走查发现两个真实缺陷，单元测试（TestClient）+ 静态审查全漏——正是集成断层。
+
+**缺陷 A（Critical）：WS 生产环境全死。** `pyproject.toml` 声明 `uvicorn>=0.30`（裸版无 WebSocket 库），uvicorn 服务下所有 `/ws/runs/{id}` → 404 + "No supported WebSocket library detected"。90 个后端测试全绿是因为 Starlette TestClient 用内存 WS 传输，不经 uvicorn。旗舰"实时流光+断点"在真实 demo.bat/dev.bat 下完全不工作。
+
+**缺陷 B（Important）：Studio 防抖编译无限循环。** 编译 effect 内 `setNodes((ns)=>ns.map(...))` 每次产生新 nodes 引用 → `currentLoom` useCallback 身份变 → effect 重触发 → 每 500ms 无限编译（走查实测 4 次/2 秒，永不停）。运行时的 active 流光 setNodes 也会触发。持续锤服务器。
+
+**Files:**
+- Modify: `backend/pyproject.toml`（`uvicorn>=0.30` → `uvicorn[standard]>=0.30`）
+- Modify: `frontend/src/pages/Studio.tsx`（编译 effect 依赖改结构签名）
+- Test: `backend/tests/test_ws_lib.py`（新建，锁 websockets 依赖可导入）
+
+**缺陷 A 修复：** pyproject dependencies 的 `"uvicorn>=0.30"` 改 `"uvicorn[standard]>=0.30"`；`backend/.venv` 已手动装 websockets 16.0（控制器走查时装的），实现者 `pip install -e .` 确认 `uvicorn[standard]` 拉齐依赖。新增测试：
+
+```python
+# backend/tests/test_ws_lib.py
+def test_websocket_library_available():
+    """uvicorn[standard] 必须带 WS 库，否则 /ws 全 404（TestClient 测不出，故显式锁依赖）。"""
+    import importlib
+    assert importlib.util.find_spec("websockets") is not None,         "websockets missing: uvicorn[standard] not installed, WS will 404 under uvicorn"
+```
+
+**缺陷 B 修复：** Studio.tsx 的编译 effect —— 提取一个不含瞬态 data（blocked/active）的结构签名，用它做依赖，使流光/blocked 的 setNodes 不再触发重编译。在 Studio 组件内加：
+
+```ts
+  const structuralKey = useMemo(
+    () => JSON.stringify({
+      n: nodes.map((n) => ({ id: n.id, t: (n.data as { def: { type: string } }).def.type,
+                             p: (n.data as { params: unknown }).params,
+                             x: Math.round(n.position.x), y: Math.round(n.position.y) })),
+      e: edges.map((e) => ({ s: e.source, sh: e.sourceHandle, t: e.target, th: e.targetHandle,
+                             f: !!(e.data as { feedback?: boolean } | undefined)?.feedback })),
+    }),
+    [nodes, edges],
+  );
+```
+
+编译 effect 的依赖数组从 `[nodes.length, edges, currentLoom, setNodes]` 改为 `[structuralKey, currentLoom, setNodes]`——**注意 effect 体内仍调 currentLoom()，但 currentLoom 的身份变化不再单独触发（structuralKey 才是闸门）**；因 structuralKey 只在真实结构变时才变，blocked/active 的 setNodes 不改结构 → 不重编译。验证：`npm run build` + 走查确认编译只在连线/改参/拖动时触发一次，静止时零编译。
+
+**验收：** 后端全量 `pytest -q` → 92 passed（91 + ws_lib 1）；前端 build 绿 + vitest 2 passed；控制器复走查确认（静止零编译 + WS 实时流）。
+
+**Commit：** `fix(app): uvicorn[standard] for production WS, Studio compile-loop via structural key`
+
+---
+
 ## D2 Carryover（D3 输入）
 
 1. Studio 参数编辑是 prompt-JSON 极简版——D3 换 schema 驱动表单（registry params 已含类型名）。
