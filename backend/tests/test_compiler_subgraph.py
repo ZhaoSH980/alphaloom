@@ -92,3 +92,14 @@ def test_nesting_depth_limit():
               "edges": []}
     r = compile_blueprint(loads_loom(json.dumps(bp)))
     assert not r.ok and any(e.code == "PARAM_INVALID" for e in r.errors)
+
+def test_garbage_port_mappings_become_compile_errors():
+    # 编译器对任何输入只返回 CompileError，绝不裸抛（可验证反馈环境的硬要求）
+    for bad_inputs in ({"x": "no_dot"}, {"x": "a.b.c"}, {"x": 42}, ["not", "a", "dict"]):
+        bp = {"id": "g", "name": "g",
+              "nodes": [{"id": "s", "type": "subgraph",
+                         "params": {"blueprint": INNER, "inputs": bad_inputs, "outputs": {}}}],
+              "edges": []}
+        r = compile_blueprint(loads_loom(json.dumps(bp)))
+        assert not r.ok, bad_inputs
+        assert any(e.code == "PARAM_INVALID" for e in r.errors), bad_inputs

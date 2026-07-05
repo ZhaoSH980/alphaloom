@@ -30,8 +30,12 @@ _HINTS = {
 
 _MAX_DEPTH = 8
 
-def _parse_ref_str(s: str) -> PortRef:
+def _parse_ref_str(s) -> PortRef:
+    if not isinstance(s, str) or s.count(".") != 1:
+        raise ValueError(f"expected 'node.port', got {s!r}")
     n, p = s.split(".")
+    if not n or not p:
+        raise ValueError(f"expected 'node.port', got {s!r}")
     return PortRef(n, p)
 
 def _expand_subgraphs(bp, depth=0):
@@ -50,7 +54,7 @@ def _expand_subgraphs(bp, depth=0):
         try:
             inner = loads_loom(_json.dumps(n.params["blueprint"]))
         except Exception as exc:
-            errors.append(CompileError("PARAM_INVALID", f"subgraph {n.id}: bad blueprint ({exc})",
+            errors.append(CompileError("PARAM_INVALID", f"subgraph {n.id}: bad blueprint ({exc!r})",
                                        node_id=n.id))
             continue
         inner, sub_errs = _expand_subgraphs(inner, depth + 1)
@@ -62,12 +66,20 @@ def _expand_subgraphs(bp, depth=0):
         edges.extend(EdgeSpec(PortRef(pre + e.src.node_id, e.src.port),
                               PortRef(pre + e.dst.node_id, e.dst.port), e.feedback)
                      for e in inner.edges)
-        for outer_port, ref in n.params.get("inputs", {}).items():
-            r = _parse_ref_str(ref)
-            in_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
-        for outer_port, ref in n.params.get("outputs", {}).items():
-            r = _parse_ref_str(ref)
-            out_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
+        try:
+            for outer_port, ref in n.params.get("inputs", {}).items():
+                r = _parse_ref_str(ref)
+                in_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
+            for outer_port, ref in n.params.get("outputs", {}).items():
+                r = _parse_ref_str(ref)
+                out_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
+        except (ValueError, AttributeError, TypeError) as exc:
+            errors.append(CompileError("PARAM_INVALID",
+                                       f"subgraph {n.id}: bad port mapping ({exc})",
+                                       node_id=n.id,
+                                       fix_hint="inputs/outputs must map port names to "
+                                                "'innerNode.port' strings."))
+            continue
     if errors:
         return None, errors
     for e in bp.edges:
