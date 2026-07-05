@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+body { background: radial-gradient(1200px 800px at 70% -10%, #101a33 0%, #060913 55%); }
+
+.panel { @apply bg-panel/90 border border-edge rounded-lg; }
+.hud-label { @apply text-[10px] uppercase tracking-[0.2em] text-slate-500; }
+.node-glow { box-shadow: 0 0 14px 3px rgba(56, 189, 248, 0.6); }
+.node-blocked { box-shadow: 0 0 14px 3px rgba(239, 68, 68, 0.7); }
+@media (prefers-reduced-motion: reduce) {
+  .node-glow, .node-blocked { transition: none; }
+}

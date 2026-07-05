@@ -1,0 +1,30 @@
+{
+  "name": "frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12",
+    "lightweight-charts": "^4.2",
+    "react": "^18.3",
+    "react-dom": "^18.3"
+  },
+  "devDependencies": {
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^4.3",
+    "autoprefixer": "^10",
+    "jsdom": "^25",
+    "postcss": "^8",
+    "tailwindcss": "^3.4",
+    "typescript": "~5.6",
+    "vite": "^5.4",
+    "vitest": "^2"
+  }
+}

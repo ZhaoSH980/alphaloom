@@ -8,3 +8,6 @@ data/*.sqlite
 runs/
 .env
 .env.*
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
