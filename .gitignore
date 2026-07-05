@@ -6,6 +6,7 @@ __pycache__/
 .hypothesis/
 data/*.sqlite
 runs/
+blueprints/user/
 .env
 .env.*
 frontend/node_modules/

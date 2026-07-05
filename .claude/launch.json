@@ -1,0 +1,10 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "alphaloom-api", "runtimeExecutable": "backend/.venv/Scripts/python",
+      "runtimeArgs": ["-m", "uvicorn", "alphaloom.serve:app", "--port", "8000", "--app-dir", "backend"],
+      "port": 8000 },
+    { "name": "alphaloom-web", "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "frontend"], "port": 5173 }
+  ]
+}
