@@ -2436,7 +2436,8 @@ def main(argv=None) -> int:
     pr.add_argument("blueprint")
     pr.add_argument("--db", required=True)
     pr.add_argument("--inst", required=True)
-    pr.add_argument("--bar", default="1m")
+    pr.add_argument("--bar", default="1m",
+                    choices=["1m", "5m", "15m", "1H", "4H", "1D"])   # Carryover 16③ sanctioned
     pr.add_argument("--start", type=int, default=None)
     pr.add_argument("--end", type=int, default=None)
     pr.add_argument("--cash", type=float, default=10_000.0)
@@ -2678,3 +2679,4 @@ git tag d1-complete
 15. **Task 9 审查移交（PaperBroker）**：①**D2 前**：`submit()` 加 `qty <= 0 → return False`（防 qty=0 除零炸 run、负 qty 负费返现——恶意节点可直呼 broker）；②**D2**：`halt()` 与 pending 单语义定案（现状熔断后已挂单下根仍成交，最多多一根 bar 敞口；建议 halt 清空 _pending 并补测试）+ summary 进 API 边界时 `profit_factor: inf → None`（浏览器 JSON.parse 不认 Infinity）；③**D4 前（接真实数据硬性）**：止损成交价 clamp——long `min(open, stop)` / short `max(open, stop)`（消除跳空乐观成交；D1 合成数据 open==prev close 无跳空故不可达）；④可选：entry fee 按 closed_qty 比例分摊、`new_qty` 判零改 `abs(...)<1e-12`（幽灵止损，D1 管线内 ExecuteOrder delta 归零精确故不可达）。
 16. **Task 10 审查移交（数据层）**：①`random.Random.gauss` 跨 Python 版本算法稳定性无官方保证（3.13.2 跨进程已实测一致）——升级 Python 后金丝雀哈希漂移首查此处；②sqlite 多连接写失败后隐式事务不回滚（连接中毒持 PENDING 锁）——D4 实时接入前加 try/rollback 或 WAL+busy_timeout；③Task 12 CLI `--bar` 加 argparse `choices=`（bar_to_ms 未知值裸 KeyError，含小写 "1h" 陷阱）；④synth 极端 vol 下 low 可为负（默认参数域不可达），可选 lo 地板。
 17. **Task 11 审查移交（对抗输入洞，D1 不可达，D2 前处理）**：①risk_gate 加 `isfinite(stop)/isfinite(qty)` 与 `qty<0` 检查（NaN stop 可穿透全链提交 NaN 卖单——与 15① qty guard 同族一起修）；②sizer 加 `equity<=0 → hold`（负 equity 使 long 信号翻空，需无 kill_switch 图才可达）；③cross_signal 触零复燃（diff [+,0,+] 第三根再发 long）与 RSI 恒价=100 语义备查（D2 指标面板展示注意）。
+18. **Task 12 边角（D2 定夺）**：收盘强平的 qty 在结算 on_bar 前快照——若策略恰在最后一根 bar 发新单，挂单与 eod_close 同价撮合后期末仓位可能非零（同价零损耗，本数据集不可达）。D2 可改为"强平前清空 _pending 再按实际仓位平"。
