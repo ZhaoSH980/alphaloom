@@ -86,3 +86,25 @@ def test_error_json_serializable():
     d = r.errors[0].to_dict()
     assert set(d) == {"code", "message", "node_id", "port", "fix_hint"}
     json.dumps(d)  # 不抛即通过
+
+def test_dup_input_port_rejected():
+    bad = GOOD + [{"from": "brain.signal", "to": "risk.signal"}]   # risk.signal 已被占
+    r = compile_blueprint(_bp(bad))
+    assert not r.ok
+    err = [e for e in r.errors if e.code == "DUP_INPUT"][0]
+    assert err.node_id == "risk" and err.port == "signal"
+
+def test_canonical_order_is_declaration_invariant():
+    a = loads_loom(json.dumps({
+        "id": "t", "name": "t",
+        "nodes": [
+            {"id": "ex", "type": "tc_exec"},
+            {"id": "risk", "type": "tc_riskgate"},
+            {"id": "brain", "type": "tc_brain"},
+            {"id": "feed", "type": "tc_feed"},
+        ],
+        "edges": list(reversed(GOOD)),
+    }))
+    b = _bp(GOOD)
+    ra, rb = compile_blueprint(a), compile_blueprint(b)
+    assert ra.ok and rb.ok and ra.order == rb.order

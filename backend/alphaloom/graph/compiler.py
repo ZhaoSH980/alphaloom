@@ -44,15 +44,30 @@ def compile_blueprint(bp: BlueprintSpec, *, bars_per_day: int = 1440) -> Compile
 
     defs = {n.id: REGISTRY[n.type] for n in bp.nodes}
     bindings: dict[str, list[InputBinding]] = {n.id: [] for n in bp.nodes}
+    taken: set[tuple[str, str]] = set()
     for e in bp.edges:
         src_ok = e.src.node_id in defs and e.src.port in defs[e.src.node_id].outputs
         dst_ok = e.dst.node_id in defs and e.dst.port in defs[e.dst.node_id].inputs
         if not src_ok or not dst_ok:
+            bad_node = e.src.node_id if not src_ok else e.dst.node_id
+            hint = None
+            if bad_node in defs:
+                d = defs[bad_node]
+                hint = (f"Node {bad_node!r} has inputs {sorted(d.inputs)} "
+                        f"and outputs {sorted(d.outputs)}.")
             errors.append(CompileError(
                 "BAD_PORT_REF",
                 f"edge {e.src.node_id}.{e.src.port} -> {e.dst.node_id}.{e.dst.port} references unknown node/port",
-                node_id=(e.src.node_id if not src_ok else e.dst.node_id)))
+                node_id=bad_node, fix_hint=hint))
             continue
+        key = (e.dst.node_id, e.dst.port)
+        if key in taken:
+            errors.append(CompileError(
+                "DUP_INPUT", f"input port {e.dst.node_id}.{e.dst.port} is wired more than once",
+                node_id=e.dst.node_id, port=e.dst.port,
+                fix_hint="Each input port accepts exactly one incoming edge; remove the extra edge."))
+            continue
+        taken.add(key)
         t_out = defs[e.src.node_id].outputs[e.src.port]
         t_in = defs[e.dst.node_id].inputs[e.dst.port]
         if t_out is not t_in:
@@ -68,12 +83,18 @@ def compile_blueprint(bp: BlueprintSpec, *, bars_per_day: int = 1440) -> Compile
         return CompileResult(False, errors)
 
     deps = {n.id: {b.src_node for b in bindings[n.id] if not b.feedback} for n in bp.nodes}
+    ts = TopologicalSorter(deps)
     try:
-        order = list(TopologicalSorter(deps).static_order())
+        ts.prepare()
     except CycleError as ce:
         return CompileResult(False, [CompileError(
             "ILLEGAL_CYCLE", f"cycle without feedback edge: {ce.args[1]}",
             fix_hint="Mark exactly the intentional back edge with \"feedback\": true; "
                      "feedback values are delivered on the NEXT bar.")])
+    order: list[str] = []
+    while ts.is_active():                 # 排序波次 Kahn：规范拓扑序
+        ready = sorted(ts.get_ready())    # 跨进程/跨声明序确定（录制回放依赖）
+        order.extend(ready)
+        ts.done(*ready)
     return CompileResult(True, [], order, bindings,
                          nodes={n.id: n for n in bp.nodes})
