@@ -319,7 +319,7 @@ class _Validator(ast.NodeVisitor):
                 _reject(node_obj, "wildcard import (import *) is not allowed", "import_denied")
         self.generic_visit(node_obj)
 
-    # ---- dunder 属性禁访问 ----
+    # ---- 下划线前缀属性禁访问（dunder + 单下划线私有属性）----
     def visit_Attribute(self, node_obj: ast.Attribute) -> None:
         if _is_dunder(node_obj.attr):
             _reject(
@@ -327,6 +327,19 @@ class _Validator(ast.NodeVisitor):
                 f"access to dunder attribute {node_obj.attr!r} is forbidden "
                 f"(sandbox escape vector)",
                 "dunder_attr",
+            )
+        # 单下划线私有属性（如 ``ctx._ctx`` / ``obj._internal``）一律拒：这堵住
+        # 一整类"经内部/私有属性反向取回受剥夺对象"的逃逸（I1 红队实锤：受限
+        # ctx 视图把真 ctx 存进 ``_ctx`` slot，``ctx._ctx.llm.chat()`` 即绕过
+        # LLM 剥离）。合法沙箱节点只对 inputs dict 做数值处理、访问自身非下划线
+        # 属性（self.factor / self.hist），无正当理由碰任何下划线属性（D3 沙箱
+        # 61 测试零误伤，实测锁定）。
+        if node_obj.attr.startswith("_"):
+            _reject(
+                node_obj,
+                f"access to private (underscore-prefixed) attribute "
+                f"{node_obj.attr!r} is forbidden (private-attribute escape vector)",
+                "private_attr",
             )
         if node_obj.attr in FORBIDDEN_ATTRS:
             _reject(

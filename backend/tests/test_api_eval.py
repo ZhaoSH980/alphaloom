@@ -651,3 +651,30 @@ def test_c1_sandbox_node_blueprint_allowed_when_offline(tmp_path):
         assert spy.calls == 0                          # 纯节点不调 llm
     finally:
         REGISTRY.pop(tp, None)
+
+
+def test_i2_sandbox_escape_returns_clean_422_not_500(tmp_path):
+    """I2：offline 下含"偷调 ctx.llm 的沙箱节点"的蓝图放行进回测，on_bar 访问被剥夺
+    的 ctx.llm → SandboxEscapeError。端点须干净 422（带解释），不是通用 500 裸栈；
+    真 llm 从未被调（Layer 1 剥离生效的证据）。"""
+    from alphaloom.nodes.registry import REGISTRY
+
+    class _OfflineSpy(_SpyLLM):
+        offline = True
+
+    spy = _OfflineSpy()
+    client = _make_app(tmp_path, llm_client=spy)
+    tp = f"thief2_{uuid.uuid4().hex[:8]}"
+    try:
+        reg = client.post("/api/nodes/custom",
+                          json={"source": _THIEF_SOURCE.format(tp=tp)})
+        assert reg.status_code == 200, reg.text     # 普通属性 ctx.llm 可注册（.llm 非下划线）
+        r = client.post("/api/eval/leaderboard",
+                        json={"inst": "BTC-USDT-SWAP", "bar": "1m",
+                              "blueprint": _thief_blueprint(tp), "blueprint_name": "thief"})
+        assert r.status_code == 422, r.text          # 干净 4xx，非 500
+        assert r.status_code < 500
+        assert "sandbox" in r.text.lower()
+        assert spy.calls == 0                          # 剥离生效，真 llm 没被偷调
+    finally:
+        REGISTRY.pop(tp, None)

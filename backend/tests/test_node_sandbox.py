@@ -694,3 +694,110 @@ def test_builtin_llm_node_still_gets_real_llm():
     candle = {"ts": 0, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0}
     engine.step(BarEvent(candle, 60_000))
     assert spy.calls == 1        # 内置受信 LLM 节点照常调真 llm（剥离只针对沙箱节点）
+
+
+# ---------------------------------------------------------------------------
+# I1（Important）：Layer 1 私有属性图逃逸——``ctx._ctx.llm`` 经受限视图的单下划线
+# slot 反向取回真 ctx。沙箱 AST 原只拦 dunder（``__x__``），不拦单下划线 ``_ctx``。
+# 修复两条：#1 沙箱 AST 拒一切下划线前缀属性访问（``private_attr``）；#3 真 ctx 移出
+# 受限视图对象图（存模块级 WeakKeyDictionary，``view._ctx``/``view.__dict__`` 够不到）。
+# ---------------------------------------------------------------------------
+
+# 经 ctx._ctx 反向取真 ctx 再偷调 llm（I1 红队原始逃逸变体）。
+CTX_UNDERSCORE_ESCAPE_SOURCE = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="ctx_esc", category="decision",
+      inputs={"candle": PinType.CANDLE}, outputs={"signal": PinType.SIGNAL},
+      cost=CostAnnotation(llm_calls_per_bar=0, deterministic=True))
+class CtxEscapeNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        ctx._ctx.llm.chat([{"role": "user", "content": "burn"}])
+        return {"signal": {"side": "long", "qty": 0.0, "stop": None, "reason": "esc"}}
+'''
+
+# 其它私有属性逃逸变体：任意单下划线属性 + 经 dunder（后者本就被拦，一并锁定）。
+_ESCAPE_VARIANT_SOURCES = {
+    "ctx_esc_ctx": 'ctx._ctx',
+    "ctx_esc_priv": 'ctx._anything.foo',
+    "ctx_esc_dunder": 'ctx.__dict__',        # dunder 早已被拦（回归锁定）
+    "ctx_esc_getset": 'inputs._secret',      # 对 inputs 的私有属性访问同样拒
+}
+
+
+def _variant_source(tp, access_expr):
+    return (
+        "from alphaloom.graph.types import PinType, CostAnnotation\n"
+        "from alphaloom.sandbox.node_sandbox import node\n\n"
+        f'@node(type="{tp}", category="indicator",\n'
+        '      inputs={"candle": PinType.CANDLE}, outputs={"value": PinType.SERIES},\n'
+        "      cost=CostAnnotation(llm_calls_per_bar=0, deterministic=True))\n"
+        "class V:\n"
+        "    def setup(self, params):\n"
+        "        pass\n"
+        "    def on_bar(self, ctx, inputs):\n"
+        f"        x = {access_expr}\n"
+        "        return {\"value\": 1.0}\n"
+    )
+
+
+@pytest.mark.parametrize("tp,expr", list(_ESCAPE_VARIANT_SOURCES.items()))
+def test_sandbox_ast_rejects_private_attribute_access(tp, expr):
+    """沙箱 AST 拒一切下划线前缀属性访问（私有 slot / 内部属性逃逸整类）——
+    注册期即 SandboxError（reason=private_attr 或 dunder_attr），绝不放它进 REGISTRY。"""
+    result = compile_node_source(_variant_source(tp, expr))
+    assert isinstance(result, SandboxError), f"{expr!r} should be rejected, got {result!r}"
+    assert result.reason in ("private_attr", "dunder_attr")
+    assert tp not in REGISTRY
+
+
+def test_ctx_underscore_escape_rejected_at_registration():
+    """I1 原始逃逸 ``ctx._ctx.llm.chat()`` 在注册期就被拒（私有属性访问），
+    偷调代码根本无从注册——最外层根治。"""
+    result = compile_node_source(CTX_UNDERSCORE_ESCAPE_SOURCE)
+    assert isinstance(result, SandboxError)
+    assert result.reason == "private_attr"
+    assert "ctx_esc" not in REGISTRY
+
+
+def test_restricted_ctx_real_ctx_not_reachable_in_object_graph():
+    """#3 纵深防御：真 ctx 不在受限视图对象图上——``view.__dict__`` 空、``_ctx``
+    属性不存在（AttributeError）。即便未来 AST 层放松，也无从经实例属性取回真 ctx。"""
+    from alphaloom.runtime.context import RunContext, SimClock
+    from alphaloom.runtime.engine import _RestrictedContext, SandboxEscapeError
+
+    real = RunContext(clock=SimClock(), run_id="r", llm="SECRET_LLM")
+    view = _RestrictedContext(real)
+    # 实例 __dict__ 里不含真 ctx（存在模块级 WeakKeyDictionary，不在对象图上）
+    inst_dict = object.__getattribute__(view, "__dict__")
+    assert "SECRET_LLM" not in repr(inst_dict)
+    assert "_ctx" not in inst_dict
+    # 直接取 _ctx 属性：走 __getattr__ → 委托真 ctx，真 ctx 无 _ctx 属性 → 该访问
+    # 委托到 real._ctx，real 是 RunContext 无 _ctx → AttributeError（不是取回真 ctx）
+    with pytest.raises(AttributeError):
+        _ = view._ctx
+    # .llm 仍被硬拦
+    with pytest.raises(SandboxEscapeError):
+        _ = view.llm
+
+
+def test_ctx_underscore_escape_blocked_at_runtime_even_if_ast_bypassed(monkeypatch):
+    """#3 独立自证：假设 AST 层被绕过（直接手构一个访问 ctx._ctx 的实例），运行期
+    受限视图的对象图上也取不回真 ctx——``view._ctx`` 抛 AttributeError 而非命中真
+    llm。用手写类模拟"AST 放行了 _ctx 访问"的最坏情况。"""
+    from alphaloom.runtime.context import RunContext, SimClock
+    from alphaloom.runtime.engine import _RestrictedContext
+
+    spy = _SpyLLM()
+    real = RunContext(clock=SimClock(), run_id="r", llm=spy)
+    view = _RestrictedContext(real)
+    # 模拟绕过 AST 的沙箱代码 ``ctx._ctx.llm`` ——对象图上 _ctx 不可达
+    try:
+        leaked = view._ctx           # 若 #3 失效，这里会拿到真 ctx
+        _ = leaked.llm.chat([{"role": "user", "content": "x"}])
+    except AttributeError:
+        pass
+    assert spy.calls == 0            # 真 llm 绝对没被经 _ctx 反向取到

@@ -64,6 +64,22 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         store.close()
 
     app = FastAPI(title="AlphaLoom API", lifespan=lifespan)
+
+    # I2：沙箱节点触发的 LLM 剥离逃逸拦截 → 干净 422（带解释），不是通用 500。
+    # offline 下含"偷调 ctx.llm 的沙箱节点"的蓝图会走进回测、on_bar 里访问被剥夺
+    # 的 ctx.llm → SandboxEscapeError。集中转 422 解释性响应（Layer 1 生效的证据，
+    # 而非裸 500）。
+    from alphaloom.runtime.engine import SandboxEscapeError as _SandboxEscapeError
+
+    @app.exception_handler(_SandboxEscapeError)
+    async def _sandbox_escape_handler(_request, exc):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "sandbox_escape",
+                     "message": f"a sandboxed node attempted a forbidden capability: "
+                                f"{exc}. Sandbox nodes are stripped of the LLM handle; "
+                                "this blueprint cannot be evaluated."})
+
     app.state.store = store
     # LLM 注入接缝：预构建 llm_client（测试注入 fake transport 的 RecordingLLMClient）优先；
     # 否则从 env 构建生产客户端（offline 跟 ALPHALOOM_OFFLINE）。构建失败则 None。

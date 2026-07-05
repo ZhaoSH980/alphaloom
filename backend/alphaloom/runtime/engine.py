@@ -1,5 +1,6 @@
 # backend/alphaloom/runtime/engine.py
 from __future__ import annotations
+import weakref
 from alphaloom.graph.types import Stamped
 from alphaloom.graph.compiler import CompileResult
 from alphaloom.runtime.context import RunContext, check_stamped
@@ -22,34 +23,49 @@ class SandboxEscapeError(RuntimeError):
 # 沙箱节点被剥夺访问的 ctx 能力（LLM 句柄 + 其 provenance 审计钩子）。
 _SANDBOX_DENIED_CTX_ATTRS = frozenset({"llm", "audit"})
 
+# 受限视图 → 真 ctx 的映射存**类外的模块级 WeakKeyDictionary**（不在实例对象图上）。
+# 这样真 ctx 在受限视图的对象图上根本不可达：``view.__dict__`` 为空、``view._ctx``
+# 不存在（AttributeError 且已被沙箱 AST 单下划线拒绝双保险）——I1 红队"经私有 slot
+# 反向取回真 ctx"的逃逸从对象图层面被彻底切断（防未来新增 slot 再犯）。弱引用键
+# 使受限视图被回收时映射项自动清理，无泄漏。
+_CTX_BACKING: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
 
 class _RestrictedContext:
     """沙箱节点专用 ctx 视图：除 .llm/.audit 外全部委托真 ctx（合法纯计算所需的
     clock/broker/current_event/run_id/recorder/halted 照常可用），.llm/.audit
     访问即抛 SandboxEscapeError。
 
-    受限视图**不是共享活 ctx**——沙箱节点拿不到真 ctx 引用，故也无从旁路取回
-    llm 句柄（属性委托只读放行白名单外的普通属性，被拒名单硬拦 llm/audit）。
+    **真 ctx 不在本对象图上**——存于模块级 WeakKeyDictionary（``_CTX_BACKING``），
+    实例本身无任何指向真 ctx 的属性（``__dict__`` 空、无 ``_ctx`` slot）。故沙箱
+    节点既够不到被剥夺的 .llm/.audit（被拒名单硬拦），也无从经任何私有属性反向
+    取回真 ctx（对象图上不可达 + 沙箱 AST 拒单下划线属性访问，双重保险）。
     """
 
-    __slots__ = ("_ctx",)
-
+    # 无 __slots__ 声明（也就没有 _ctx slot）；实例 __dict__ 保持空。
     def __init__(self, ctx: RunContext) -> None:
-        object.__setattr__(self, "_ctx", ctx)
+        _CTX_BACKING[self] = ctx
 
     def __getattr__(self, name):
+        # __getattr__ 只在常规查找失败时触发——本类无实例属性，故所有属性都走这里。
         if name in _SANDBOX_DENIED_CTX_ATTRS:
             raise SandboxEscapeError(
                 f"sandboxed node may not access ctx.{name}: the LLM handle is "
                 "stripped from sandbox nodes (declared-deterministic must be truly "
                 "deterministic; sandbox nodes cannot burn LLM quota)")
-        return getattr(object.__getattribute__(self, "_ctx"), name)
+        ctx = _CTX_BACKING.get(self)
+        if ctx is None:
+            raise AttributeError(name)
+        return getattr(ctx, name)
 
     def __setattr__(self, name, value):
         if name in _SANDBOX_DENIED_CTX_ATTRS:
             raise SandboxEscapeError(
                 f"sandboxed node may not set ctx.{name}")
-        setattr(object.__getattribute__(self, "_ctx"), name, value)
+        ctx = _CTX_BACKING.get(self)
+        if ctx is None:                        # __init__ 期尚未登记 → 内部错误
+            raise AttributeError(name)
+        setattr(ctx, name, value)
 
 class Engine:
     def __init__(self, compiled: CompileResult, instances: dict, ctx: RunContext,
