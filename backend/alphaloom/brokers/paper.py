@@ -36,6 +36,9 @@ class PaperBroker:
     def equity(self) -> float:
         return self.cash + self._pos.qty * self._last_close
 
+    def last_price(self) -> float:
+        return self._last_close
+
     def on_bar(self, candle: dict) -> None:
         o = float(candle["open"])
         pending, self._pending = self._pending, []
@@ -68,6 +71,7 @@ class PaperBroker:
             p.avg_price = total / (abs(p.qty) + abs(signed))
         if crossed:
             p.avg_price = price          # 反手剩余部分按本次成交价计新仓成本
+            p.stop = od.stop             # 反手 = 新仓位：不继承旧仓方向的止损（None 即无止损）
         if new_qty == 0:
             p.avg_price = 0.0
             p.stop = None
