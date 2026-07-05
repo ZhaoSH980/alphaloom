@@ -115,6 +115,7 @@ backend/.venv/Scripts/python -m pip install -U pip pytest hypothesis
 backend/.venv/
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
 .hypothesis/
 data/sample.sqlite
@@ -122,6 +123,7 @@ runs/
 .env
 .env.*
 ```
+（`*.egg-info/` 为 sanctioned deviation：editable 安装的构建产物，Task 1 实现时发现）
 
 - [ ] **Step 3: 写入 `LICENSE`（MIT，版权行 `Copyright (c) 2026 Zhao Chenghao`，标准 MIT 全文）与 `backend/pyproject.toml`**
 
