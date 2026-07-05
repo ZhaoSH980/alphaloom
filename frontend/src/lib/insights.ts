@@ -21,6 +21,11 @@ export interface Verdict {
   lesson?: string;
 }
 
+/** 一个委员会角色的解析后 JSON 对象（后端产 list[dict]，llm_nodes.py:257）。
+ * 策略师 {side, rationale, confidence} / 风控官 {veto, concern, confidence} /
+ * 主席 {side, rationale, confidence}——字段可选，渲染时按存在与否展示。 */
+export type CommitteeRole = Record<string, unknown>;
+
 /** 一个委员会节点在某根 bar 的三角色轨迹。 */
 export interface CommitteeSnapshot {
   nodeId: string;
@@ -28,7 +33,7 @@ export interface CommitteeSnapshot {
   side?: string;
   rationale?: string;
   confidence?: number;
-  trace: string[];         // [strategist_json, risk_json, chair_json]
+  trace: CommitteeRole[];  // [strategist_json, risk_json, chair_json]（解析后的角色对象）
 }
 
 /** 整个 run 的 Agent 洞察汇总。 */
@@ -65,6 +70,14 @@ function toStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
+// committee_trace 是 list[dict]（角色 JSON 对象），保留 dict 元素——不能当字符串处理。
+function toRoleArray(v: unknown): CommitteeRole[] {
+  if (!Array.isArray(v)) return [];
+  const out: CommitteeRole[] = [];
+  for (const x of v) { const r = asRecord(x); if (r) out.push(r); }
+  return out;
+}
+
 /**
  * 从整个 run 的 trace 行集合派生 Agent 洞察。纯函数、无副作用——可单测。
  * 优雅降级：无相关节点时 committees/verdicts/citations 空、memoryUsed=false、hasAny=false。
@@ -99,7 +112,7 @@ export function parseInsights(rows: TraceRow[]): RunInsights {
     const sig = findSignal(outputs);
     if (sig) {
       for (const c of toStringArray(sig.citations)) citationSet.add(c);
-      const ctrace = toStringArray(sig.committee_trace);
+      const ctrace = toRoleArray(sig.committee_trace);  // list[dict]，非 list[str]
       if (ctrace.length > 0)
         committeeLatest.set(row.node_id, {
           nodeId: row.node_id,

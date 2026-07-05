@@ -5,13 +5,56 @@ import EquityChart from "../components/EquityChart";
 import SummaryCards from "../components/SummaryCards";
 import TradesTable from "../components/TradesTable";
 import { getCandles, getRun, getTrace, listRuns } from "../lib/api";
-import { parseInsights, VERDICT_META, type RunInsights, type TraceRow } from "../lib/insights";
+import { parseInsights, VERDICT_META,
+         type CommitteeRole, type RunInsights, type TraceRow } from "../lib/insights";
 import { useLang } from "../lib/i18n";
 
 const BADGE: Record<string, string> = {
   completed: "bg-loom-green/20 text-loom-green", failed: "bg-loom-red/20 text-loom-red",
   halted: "bg-loom-amber/20 text-loom-amber", running: "bg-loom-blue/20 text-loom-blue",
 };
+
+// 委员会角色顺序（后端固定：策略师 → 风控官 → 主席，llm_nodes.py:257）。
+const ROLE_LABELS = ["strategist", "risk officer", "chair"];
+
+// —— 单个委员会角色卡：展示解析后的角色 JSON 对象（dict）字段 ——
+// 后端 committee_trace 是 list[dict]：策略师 {side,rationale,confidence} /
+// 风控官 {veto,concern,confidence} / 主席 {side,rationale,confidence}。
+// 已知字段结构化展示，其余字段回退 JSON。
+function CommitteeRoleCard({ role, idx }: { role: CommitteeRole; idx: number }) {
+  const label = ROLE_LABELS[idx] ?? `role ${idx + 1}`;
+  const side = typeof role.side === "string" ? role.side : undefined;
+  const rationale = typeof role.rationale === "string" ? role.rationale : undefined;
+  const concern = typeof role.concern === "string" ? role.concern : undefined;
+  const confidence = typeof role.confidence === "number" ? role.confidence : undefined;
+  const veto = typeof role.veto === "boolean" ? role.veto : undefined;
+  const known = new Set(["side", "rationale", "concern", "confidence", "veto"]);
+  const extras = Object.keys(role).filter((k) => !known.has(k));
+  const structured = side !== undefined || rationale !== undefined
+    || concern !== undefined || confidence !== undefined || veto !== undefined;
+
+  return (
+    <div className="text-[10px] border-l-2 border-loom-amber/50 pl-1.5 space-y-0.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="hud-label text-[9px] text-loom-amber">{label}</span>
+        {side && <span className="font-mono text-slate-200">{side}</span>}
+        {veto !== undefined && (
+          <span className={`px-1 py-0.5 rounded text-[9px] ${veto
+            ? "bg-loom-red/20 text-loom-red" : "bg-loom-green/20 text-loom-green"}`}>
+            {veto ? "veto" : "no veto"}
+          </span>)}
+        {confidence !== undefined && (
+          <span className="font-mono text-loom-green">{confidence.toFixed(2)}</span>)}
+      </div>
+      {rationale && <div className="text-slate-400">{rationale}</div>}
+      {concern && <div className="text-slate-400">{concern}</div>}
+      {(!structured || extras.length > 0) && (
+        <pre className="text-[9px] font-mono text-slate-500 whitespace-pre-wrap max-h-24 overflow-auto">
+          {JSON.stringify(structured ? Object.fromEntries(extras.map((k) => [k, role[k]])) : role, null, 2)}
+        </pre>)}
+    </div>
+  );
+}
 
 // —— Agent 富信息面板：委员会轨迹 + RAG 引用 + 反思四象限 + 记忆开关 ——
 // 全部从 run trace 读（getTrace(runId) 一次拉全节点），无相关节点则优雅显示"无"。
@@ -101,11 +144,7 @@ function AgentInsights({ runId }: { runId: string }) {
           {c.rationale && <div className="text-[10px] text-slate-400">{c.rationale}</div>}
           <div className="space-y-1">
             {c.trace.map((role, i) => (
-              <pre key={i}
-                   className="text-[9px] font-mono text-slate-400 whitespace-pre-wrap
-                              border-l-2 border-loom-amber/50 pl-1.5 max-h-32 overflow-auto">
-                {role}
-              </pre>))}
+              <CommitteeRoleCard key={i} role={role} idx={i} />))}
           </div>
         </div>))}
     </div>

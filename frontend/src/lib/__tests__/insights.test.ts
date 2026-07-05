@@ -20,13 +20,23 @@ describe("parseInsights", () => {
   });
 
   it("extracts committee trace, citations, verdicts and memory flag from a rich run", () => {
+    // committee_trace 是后端真实形状 list[dict]（llm_nodes.py:257 `[strat_json, risk_json,
+    // chair_json]`——解析后的角色 JSON 对象，非字符串）：
+    //   策略师 {side, rationale, confidence} / 风控官 {veto, concern, confidence} /
+    //   主席 {side, rationale, confidence}。
+    const strat = { side: "long", rationale: "breakout", confidence: 0.8 };
+    const risk = { veto: false, concern: "watch atr", confidence: 0.6 };
+    const chair = { side: "long", rationale: "confirmed", confidence: 0.7 };
     const rows: TraceRow[] = [
       // 委员会节点：signal 输出含 committee_trace（早/晚各一条 → 取最后一条）。
       { event_idx: 0, ts: 1, node_id: "committee_1",
-        outputs: { signal: wrap({ side: "hold", committee_trace: ["{s0}", "{r0}", "{c0}"] }) } },
+        outputs: { signal: wrap({ side: "hold", committee_trace: [
+          { side: "hold", rationale: "flat", confidence: 0.3 },
+          { veto: true, concern: "too choppy", confidence: 0.6 },
+          { side: "hold", rationale: "stand down", confidence: 0.3 }] }) } },
       { event_idx: 5, ts: 6, node_id: "committee_1",
         outputs: { signal: wrap({ side: "long", confidence: 0.7, rationale: "trend up",
-          committee_trace: ["{s1}", "{r1}", "{c1}"], citations: ["grid.md#1"] }) } },
+          committee_trace: [strat, risk, chair], citations: ["grid.md#1"] }) } },
       // 记忆节点：experience_retrieve 产 lessons。
       { event_idx: 5, ts: 6, node_id: "experience_retrieve_1", outputs: { lessons: wrap(["lesson a"]) } },
       // 反思节点：平仓那根产 verdict（非平仓根为 null → 应被跳过）。
@@ -38,9 +48,12 @@ describe("parseInsights", () => {
     const r = parseInsights(rows);
     expect(r.hasAny).toBe(true);
     expect(r.memoryUsed).toBe(true);
-    // 委员会取最后一条快照。
+    // 委员会取最后一条快照——trace 是解析出的三个角色对象（dict），不是字符串。
     expect(r.committees).toHaveLength(1);
-    expect(r.committees[0].trace).toEqual(["{s1}", "{r1}", "{c1}"]);
+    expect(r.committees[0].trace).toEqual([strat, risk, chair]);
+    expect(r.committees[0].trace).toHaveLength(3);
+    expect(r.committees[0].trace[0]).toMatchObject({ side: "long", confidence: 0.8 });
+    expect(r.committees[0].trace[1]).toMatchObject({ veto: false, concern: "watch atr" });
     expect(r.committees[0].side).toBe("long");
     expect(r.committees[0].confidence).toBe(0.7);
     // 引用去重聚合。
