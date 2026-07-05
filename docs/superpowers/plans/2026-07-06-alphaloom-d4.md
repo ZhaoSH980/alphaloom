@@ -21,6 +21,12 @@
 - **L3 手续费+滑点加压**：L2 + 额外滑点模型（bps）
 产出 `LadderReport{levels: [{level, net_pnl, max_dd, num_trades, profit_factor}], optimism_gap: L0_pnl - L3_pnl}`。**注意**：这是重放已生成的成交序列在不同成交假设下，不重跑 LLM（决策不变、只变成交撮合），故零配额。
 
+> **D4-T2 实施修订（sanctioned deviations，审查确认后写回契约）**：
+> 1. **签名**定为 `fidelity_ladder(fills, candles, *, initial_cash=10_000.0, fee_rate=0.0005, slippage_bps=5.0) -> LadderReport`（非 `(blueprint, source, fills)`）。下单意图由 `replay_intents(fills, candles)` 从成交序列反推（fill.ts = L1 执行 bar、信号 bar = 紧邻前根；stop / eod_close 腿特判，见第 4 条），零改 runner、零重跑决策——最小侵入且天然零配额。
+> 2. **L0 定义精化**为"信号 bar 收盘价与次 bar 开盘价中取对交易者**更有利**一侧"。原因：纯"信号 close 成交"在**有利跳空**行情下会出现 L1 > L0，与本契约自己锁定的单调性测试（L0≥L1≥L2≥L3）自相矛盾；取优是唯一自洽解，且更贴合 L0"最乐观的谎言"叙事。
+> 3. **fee 四档统一按 fee_rate 收**（非字面"手续费只在 L3"）。原因：PaperBroker（D1 基线）每笔 fill 都收费，若 L1 不收费则 L1 对不上基线 net_pnl——又一内部矛盾。L3 的"加压"体现为**额外** slippage_bps 名义额滑点。
+> 4. **腿级语义修订**（实施中发现）：stop fill（tag="stop"，PaperBroker 盘中触发、成交价=stop 位）以其**真实成交价为 L1 基准**，不按"次 bar 开盘"重放（否则系统性乐观）；eod_close 合成结算腿（ts=末根+bar_ms，数据外）以**末 bar close** 定价（对齐 runner 结算语义，使 L1 与 broker net_pnl 精确对齐）；L2 成交价 **clamp 到执行 bar [low, high]**（病态宽振幅 bar 否则产生负价并破坏 L3≥L2 单调，审查者构造性反例实锤）；L3 滑点施加于 clamp 后价格、允许越出 bar 观测路径（滑点=市场冲击本可超出已观测成交带，且若 clamp L3 会在最需要加压的病态 bar 上把加压归零——与 L3 的目的相反）。
+
 **蓝图记分卡**（spec §7）：`eval/scorecard.py::scorecard(run_report, ladder?, ablation?) -> Scorecard`——聚合样本内/验证窗表现、保真度阶梯衰减、成本证书、（可选）反事实/消融摘要。gallery 按证据排序（记分卡的综合分）。
 
 **基线排行榜**（spec §7）：`eval/leaderboard.py::leaderboard(blueprint_runs, baselines) -> Board`。基线：buy-and-hold、默认参数网格、随机参数。同表对比 net_pnl/return/max_dd/win_rate + **样本内-验证窗泛化差距**。Agent 必须证明打得过无脑基线（若打不过，如实展示——诚实传统）。

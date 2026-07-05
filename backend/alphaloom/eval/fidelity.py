@@ -5,17 +5,38 @@
 不变，只变成交撮合假设，故零配额、纯数值。
 
 四档成交模型（越往下越真实、越悲观）：
-- **L0 天真收盘成交**：最乐观——进出场都取"信号 bar 收盘价 vs 次 bar 开盘价"中对
+- **L0 天真收盘成交**：最乐观——进出场都取"信号 bar 收盘价 vs L1 基准价"中对
   交易者更有利的一侧（无滑点、无时序延迟惩罚）。
 - **L1 次 bar 开盘**：PaperBroker 现状（D1 基线）——信号次 bar 开盘价成交。
-- **L2 盘中路径代理**：用执行 bar 的 OHLC 路径估更差成交——进出场都在次 bar 开盘价
-  上叠加"半个 bar 振幅 (high-low)/2"的**不利偏移**（买更贵、卖更便宜）。
-- **L3 手续费+滑点加压**：L2 之上再叠加 `slippage_bps` 名义额滑点（永远不利）。
+- **L2 盘中路径代理**：用执行 bar 的 OHLC 路径估更差成交——在 L1 基准价上叠加
+  "半个 bar 振幅 (high-low)/2"的**不利偏移**（买更贵、卖更便宜），并 **clamp 到
+  执行 bar [low, high]**（成交必在观测路径内；病态宽振幅 bar 否则产生负价）。
+- **L3 手续费+滑点加压**：clamp 后的 L2 价再叠加 `slippage_bps` 名义额滑点（永远
+  不利）。**故意不 clamp**：滑点=市场冲击可越出 bar 观测成交带，且若 clamp 会在
+  最需要加压的病态 bar 上把加压归零——与 L3 目的相反。
+
+**腿级基准价（L1 语义对齐 PaperBroker/runner，使 L1 精确复现 broker net_pnl）**：
+- 常规腿：执行 bar（信号次 bar）开盘价——PaperBroker 次 bar 开盘成交。
+- **stop 腿**（tag="stop"）：**stop 位本身**（PaperBroker 盘中触发、成交价=stop，
+  见 paper.py on_bar；若按"次 bar 开盘"重放会系统性乐观）。exec bar=触发 bar，
+  L0 取触发 bar close 与 stop 取优（"收盘检查止损"的乐观谎言），L2/L3 在 stop
+  价上加不利偏移。
+- **eod_close 结算腿**（ts=末根+bar_ms，数据外合成 bar）：**末 bar close**（runner
+  的 EOD 结算价）。结算腿无时序谎言：signal=exec → L0=L1。
+
+**fee 语义**：四档统一按 fee_rate 每腿收费（对齐 PaperBroker 每笔 fill 收费；若
+L1 不收费则对不上 D1 基线）。L3 的"加压"是**额外** slippage_bps，不与 fee 重复。
 
 **单调性契约（测谎仪心脏）**：net_pnl L0 ≥ L1 ≥ L2 ≥ L3。实现保证方式——
-每档对每笔成交施加一个**逐档单调非减的不利价格偏移**（相对 L1 基准价）：
-L0 偏移 ≤ 0（更优）≤ L1(=0) ≤ L2 ≤ L3。故净利单调下降**按构造成立**，与行情
-方向无关（涨跌都单调）。若测试发现不单调 → 成交模型有 bug。
+每档对每笔成交施加一个**逐档单调非减的不利价格偏移**（相对该腿 L1 基准价）：
+L0 偏移 ≤ 0（更优）≤ L1(=0) ≤ L2 ≤ L3（clamp 是单调算子、L3 在正价上乘性加压，
+均保持次序）。未平仓头寸盯市恒用 L1 基准价（各档一致），档位差异只进成交价与
+fee。故净利单调下降**按构造成立**，与行情方向无关。若测试发现不单调 → 成交
+模型有 bug。
+
+**已知局限（如实披露）**：stop 腿的重放依赖 PaperBroker 的 tag="stop" 约定识别；
+其它来源的 fills 若不带该 tag，stop 腿会按常规"次 bar 开盘"语义重放（系统性
+乐观）。L2 半振幅代理是路径**代理**而非逐笔重建；L3 滑点是名义额线性模型。
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -30,8 +51,9 @@ from dataclasses import dataclass, field
 class Intent:
     side: str            # "buy" | "sell"
     qty: float
-    exec_ts: int         # L1 执行 bar 的 ts（= 原 Fill.ts）
-    signal_ts: int       # 信号 bar 的 ts（紧邻 exec 前一根；首根无前根则退化为 exec_ts）
+    exec_ts: int         # 执行 bar 的 ts（常规=原 Fill.ts；eod 归位末根真实 bar）
+    signal_ts: int       # 信号 bar 的 ts（常规=紧邻前根；stop/eod=exec 自身）
+    base_price: float    # 该腿 L1 基准价（常规=exec 开盘；stop=stop 位；eod=末 bar close）
     tag: str = ""
 
 
@@ -41,30 +63,41 @@ def _fill_field(f, name):
 
 
 def replay_intents(fills, candles) -> list[Intent]:
-    """从 fills + candles 反推下单意图序列。
+    """从 fills + candles 反推下单意图序列（腿级 L1 基准价见模块 docstring）。
 
-    每笔 fill 的 ts 对应 L1 执行 bar；信号 bar = candles 中紧邻其前的一根。
-    首根 bar 执行（无前根）时 signal_ts 退化为执行 bar 自身，避免越界。
+    - 常规腿：fill.ts = L1 执行 bar；信号 bar = 紧邻前根（首根无前根则退化为
+      exec 自身）；基准价 = 执行 bar 开盘。
+    - stop 腿（tag="stop"，PaperBroker 约定）：exec = 触发 bar 自身，基准价 =
+      fill 真实成交价（stop 位），signal=exec（盘中信号）。
+    - eod_close 结算腿（ts 不在 candles：末根+bar_ms 合成 bar）：归位末根真实
+      bar，基准价 = 末 bar close（runner 结算价），signal=exec（无时序谎言）。
     fills 可为 Fill 对象或 dict（run_backtest 的 report.fills）。
     """
     ts_list = [int(c["ts"]) for c in candles]
     ts_index = {t: i for i, t in enumerate(ts_list)}
-    last_ts = ts_list[-1] if ts_list else 0
     intents: list[Intent] = []
     for f in fills:
         raw_ts = int(_fill_field(f, "ts"))
-        # eod_close 等收盘强平的 ts = 末根+bar_ms（数据外合成 bar，不在 candles）。
-        # 归位到最后一根真实 bar，其 close 即 runner 的 EOD 结算价。
-        exec_ts = raw_ts if raw_ts in ts_index else last_ts
-        i = ts_index.get(exec_ts)
-        if i is not None and i > 0:
-            signal_ts = ts_list[i - 1]
+        tag = _fill_field(f, "tag")
+        if raw_ts not in ts_index:
+            # eod_close 收盘强平：数据外合成 bar → 归位末根真实 bar，按其 close 结算。
+            exec_ts = ts_list[-1] if ts_list else raw_ts
+            base = float(candles[-1]["close"]) if candles else float(_fill_field(f, "price"))
+            signal_ts = exec_ts               # 结算腿无时序谎言：L0 = L1
+        elif tag == "stop":
+            # 盘中止损：成交价 = stop 位（PaperBroker 语义），不按次 bar 开盘重放。
+            exec_ts = raw_ts
+            base = float(_fill_field(f, "price"))
+            signal_ts = exec_ts               # 盘中信号：L0 用触发 bar close 与 stop 取优
         else:
-            signal_ts = exec_ts
+            exec_ts = raw_ts
+            i = ts_index[exec_ts]
+            base = float(candles[i]["open"])
+            signal_ts = ts_list[i - 1] if i > 0 else exec_ts
         intents.append(Intent(side=_fill_field(f, "side"),
                               qty=float(_fill_field(f, "qty")),
                               exec_ts=exec_ts, signal_ts=signal_ts,
-                              tag=_fill_field(f, "tag")))
+                              base_price=base, tag=tag))
     return intents
 
 
@@ -81,27 +114,28 @@ def _adverse_sign(side: str) -> float:
 
 def _price_for_level(level: str, intent: Intent, by_ts: dict,
                      slippage_bps: float) -> float:
-    """给定档位算某笔意图的成交价。所有偏移相对 L1 基准价（次 bar 开盘）单调施加。"""
+    """给定档位算某笔意图的成交价。所有偏移相对该腿 L1 基准价单调施加。"""
     exec_bar = by_ts[intent.exec_ts]
-    base = float(exec_bar["open"])          # L1 基准价：次 bar 开盘
+    base = intent.base_price                # 腿级 L1 基准价（常规/stop/eod 见 replay_intents）
     s = _adverse_sign(intent.side)          # +1 买 / -1 卖
-    half_range = (float(exec_bar["high"]) - float(exec_bar["low"])) / 2.0
-    if half_range < 0:
-        half_range = 0.0
+    lo, hi = float(exec_bar["low"]), float(exec_bar["high"])
+    half_range = max(0.0, (hi - lo) / 2.0)
 
     if level == "L1":
         return base
     if level == "L0":
-        # 最乐观：信号 bar 收盘 vs 次 bar 开盘，取对交易者更有利一侧。
+        # 最乐观：信号 bar 收盘 vs L1 基准价，取对交易者更有利一侧。
         sig_bar = by_ts.get(intent.signal_ts)
         sig_close = float(sig_bar["close"]) if sig_bar is not None else base
         # 买入取更低价，卖出取更高价 → 相对 base 的偏移 ≤ 0（不利量 ≤ L1）。
         return min(base, sig_close) if intent.side == "buy" else max(base, sig_close)
+    # L2：盘中路径代理——半振幅不利偏移后 clamp 到执行 bar [low, high]
+    #（成交必在观测路径内；病态宽振幅 bar 否则产生负价并破坏 L3≥L2 单调）。
+    l2 = min(max(base + s * half_range, lo), hi)
     if level == "L2":
-        # 盘中路径代理：叠加半振幅不利偏移（买 +，卖 -）。
-        return base + s * half_range
-    # L3：L2 + 额外 slippage_bps 名义额滑点（永远不利）。
-    l2 = base + s * half_range
+        return l2
+    # L3：clamp 后的 L2 价 + 额外 slippage_bps 名义额滑点（永远不利，故意不 clamp：
+    # 滑点=市场冲击可越出观测成交带；clamp L3 会在病态 bar 上把加压归零）。
     return l2 * (1.0 + s * slippage_bps / 10_000.0)
 
 
@@ -122,9 +156,9 @@ def _replay_level(level: str, intents: list[Intent], by_ts: dict, *,
 
     for it in intents:
         price = _price_for_level(level, it, by_ts, slippage_bps)
-        # mark 用 L1 基准价（各档一致）——档位差异只体现在成交价(price)与 fee 上，
+        # mark 用腿级 L1 基准价（各档一致）——档位差异只体现在成交价(price)与 fee 上，
         # 不污染未平仓头寸的盯市，否则未平仓的进场滑点会反向抬高盯市、破坏单调性。
-        mark = float(by_ts[it.exec_ts]["open"])
+        mark = it.base_price
         fee = it.qty * price * fee_rate
         signed = it.qty if it.side == "buy" else -it.qty
         closing = (pos_qty > 0 > signed) or (pos_qty < 0 < signed)
