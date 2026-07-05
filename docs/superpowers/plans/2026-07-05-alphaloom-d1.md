@@ -850,6 +850,8 @@ def test_garbage_port_mappings_become_compile_errors():
 
 （`test_garbage_port_mappings_become_compile_errors` 与映射解析加固为 Task 5 审查后 sanctioned deviation：Critical C1——垃圾映射不得裸抛。）
 
+**Task 11 期间的 sanctioned deviations（控制器裁决）**：①CandleFeed emit 浅拷贝 `dict(ev.candle)`（Carryover 13② 落地）；②AtrNode warm 分支按测试语义化简（预授权）；③PaperBroker `_fill` 的 crossed 分支加 `p.stop = od.stop`（反手不继承旧方向止损——Task 11 TDD 发现的真 bug，测试信号同步改为带 stop=105.0）；④**不采纳**实现者的 execution.py 错侧止损静默丢弃 + broker.last_price() 方案——错侧止损应暴露上游门控 bug 而非被静默吞掉，execution.py 保持计划原文。
+
 - [ ] **Step 2: 运行确认失败**
 
 Run: `cd backend && .venv/Scripts/python -m pytest tests/test_compiler_subgraph.py -q`
@@ -1599,6 +1601,7 @@ class PaperBroker:
             p.avg_price = total / (abs(p.qty) + abs(signed))
         if crossed:
             p.avg_price = price          # 反手剩余部分按本次成交价计新仓成本
+            p.stop = od.stop             # 反手=新仓位：不继承旧方向止损（Task 11 TDD 发现的真 bug）
         if new_qty == 0:
             p.avg_price = 0.0
             p.stop = None
@@ -1940,7 +1943,7 @@ def test_execute_order_delta_and_reversal():
     assert ex.on_bar(ctx, {"signal": stamped})["submitted"] is True
     broker.on_bar({"ts": 60_000, "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1})
     assert broker.position().qty == 2.0
-    rev = dict(stamped, side="short", qty=1.0)
+    rev = dict(stamped, side="short", qty=1.0, stop=105.0)   # 反手信号带正确方向的止损
     ex.on_bar(ctx, {"signal": rev})
     broker.on_bar({"ts": 120_000, "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1})
     assert broker.position().qty == -1.0          # 2.0 多 → 1.0 空，一次性下 3.0 卖单
