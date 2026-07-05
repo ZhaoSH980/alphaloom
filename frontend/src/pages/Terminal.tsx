@@ -7,6 +7,7 @@ import TradesTable from "../components/TradesTable";
 import { getCandles, getRun, getTrace, listRuns } from "../lib/api";
 import { parseInsights, VERDICT_META,
          type CommitteeRole, type RunInsights, type TraceRow } from "../lib/insights";
+import { inferCommitteeRole } from "../lib/eval";
 import { useLang } from "../lib/i18n";
 
 const BADGE: Record<string, string> = {
@@ -14,15 +15,16 @@ const BADGE: Record<string, string> = {
   halted: "bg-loom-amber/20 text-loom-amber", running: "bg-loom-blue/20 text-loom-blue",
 };
 
-// 委员会角色顺序（后端固定：策略师 → 风控官 → 主席，llm_nodes.py:257）。
-const ROLE_LABELS = ["strategist", "risk officer", "chair"];
-
 // —— 单个委员会角色卡：展示解析后的角色 JSON 对象（dict）字段 ——
 // 后端 committee_trace 是 list[dict]：策略师 {side,rationale,confidence} /
 // 风控官 {veto,concern,confidence} / 主席 {side,rationale,confidence}。
+// 角色标签**按元素形状推断**（inferCommitteeRole）——不按下标：消融 no_risk_officer
+// 臂 trace 只有 [策略师,主席]，按下标会把主席误标成 risk officer（T4 审查遗留必修）。
 // 已知字段结构化展示，其余字段回退 JSON。
-function CommitteeRoleCard({ role, idx }: { role: CommitteeRole; idx: number }) {
-  const label = ROLE_LABELS[idx] ?? `role ${idx + 1}`;
+function CommitteeRoleCard(
+  { role, idx, trace }: { role: CommitteeRole; idx: number; trace: CommitteeRole[] },
+) {
+  const label = inferCommitteeRole(trace, idx);
   const side = typeof role.side === "string" ? role.side : undefined;
   const rationale = typeof role.rationale === "string" ? role.rationale : undefined;
   const concern = typeof role.concern === "string" ? role.concern : undefined;
@@ -144,7 +146,7 @@ function AgentInsights({ runId }: { runId: string }) {
           {c.rationale && <div className="text-[10px] text-slate-400">{c.rationale}</div>}
           <div className="space-y-1">
             {c.trace.map((role, i) => (
-              <CommitteeRoleCard key={i} role={role} idx={i} />))}
+              <CommitteeRoleCard key={i} role={role} idx={i} trace={c.trace} />))}
           </div>
         </div>))}
     </div>

@@ -33,3 +33,30 @@ export const getTrace = (runId: string, nodeId?: string, eventIdx?: number, limi
   q.set("limit", String(limit));
   return j<Record<string, any>[]>(fetch(`/api/runs/${runId}/trace?${q}`));
 };
+
+// —— Eval / Evolve 端点（D4-T6，全 POST，返回对应 to_dict JSON，无 envelope）——
+import type { LadderReport, Board, AblationReport, Scorecard, Genealogy } from "./eval";
+
+const post = <T>(url: string, body: Record<string, unknown>) =>
+  j<T>(fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body) }));
+
+/** 保真度阶梯：从一个已完成 run 取 fills+candles 重放（零 LLM）。 */
+export const evalFidelity = (runId: string, opts: Record<string, unknown> = {}) =>
+  post<LadderReport>("/api/eval/fidelity", { run_id: runId, ...opts });
+
+/** 基线排行榜：三基线 + 可选指定蓝图，同窗对比。 */
+export const evalLeaderboard = (body: Record<string, unknown>) =>
+  post<Board>("/api/eval/leaderboard", body);
+
+/** 委员会消融三臂：full / no_risk_officer / no_rag（LLM 蓝图须 offline）。 */
+export const evalAblation = (body: Record<string, unknown>) =>
+  post<AblationReport>("/api/eval/ablation", body);
+
+/** 蓝图记分卡：把已算好的证据碎片拼成权威综合分（评分实现只在后端）。 */
+export const evalScorecard = (body: Record<string, unknown>) =>
+  post<Scorecard>("/api/eval/scorecard", body);
+
+/** 进化实验室：LLM 变异算子 + 编译守门 + 谱系树（规模硬锁定）。 */
+export const evolve = (body: Record<string, unknown>) =>
+  post<Genealogy>("/api/evolve", body);
