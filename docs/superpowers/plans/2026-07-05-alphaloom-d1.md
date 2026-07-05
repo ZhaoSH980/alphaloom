@@ -86,7 +86,7 @@ alphaloom/                              # 仓库根（已存在 docs/）
 - `PinType(str, Enum)`：`EXEC/CANDLE/SERIES/SIGNAL/RISK_STAMPED_SIGNAL/BOOL`
 - `Stamped(value: Any, as_of: int)`（as_of = 毫秒 epoch，与 OKX ts 一致）
 - `CostAnnotation(llm_calls_per_bar=0, max_tokens_per_call=0, latency_class="fast", deterministic=True)`
-- `CompileError(code, message, node_id=None, port=None, fix_hint=None)`；错误码集合：`UNKNOWN_NODE_TYPE / BAD_PORT_REF / DUP_NODE_ID / TYPE_MISMATCH / ILLEGAL_CYCLE / PARAM_INVALID`
+- `CompileError(code, message, node_id=None, port=None, fix_hint=None)`；错误码集合：`UNKNOWN_NODE_TYPE / BAD_PORT_REF / DUP_NODE_ID / DUP_INPUT / TYPE_MISMATCH / ILLEGAL_CYCLE / PARAM_INVALID`（DUP_INPUT 为 Task 4 审查后 sanctioned deviation：每个输入端口至多一条入边）
 - `compile_blueprint(bp: BlueprintSpec, *, bars_per_day=1440) -> CompileResult(ok, errors, order, bindings, certificate, nodes)`——`nodes` 为**展开后**的 `dict[node_id, NodeSpec]`（含子图展开产物 `sub/inner`），runner 用它实例化
 - `InputBinding(dst_port, src_node, src_port, feedback: bool)`
 - 节点类协议：`setup(self, params: dict) -> None`；`on_bar(self, ctx: RunContext, inputs: dict) -> dict`；实例属性 `self.state: dict`
@@ -561,7 +561,31 @@ def test_error_json_serializable():
     d = r.errors[0].to_dict()
     assert set(d) == {"code", "message", "node_id", "port", "fix_hint"}
     json.dumps(d)  # 不抛即通过
+
+def test_dup_input_port_rejected():
+    bad = GOOD + [{"from": "brain.signal", "to": "risk.signal"}]   # risk.signal 已被占
+    r = compile_blueprint(_bp(bad))
+    assert not r.ok
+    err = [e for e in r.errors if e.code == "DUP_INPUT"][0]
+    assert err.node_id == "risk" and err.port == "signal"
+
+def test_canonical_order_is_declaration_invariant():
+    a = loads_loom(json.dumps({
+        "id": "t", "name": "t",
+        "nodes": [
+            {"id": "ex", "type": "tc_exec"},
+            {"id": "risk", "type": "tc_riskgate"},
+            {"id": "brain", "type": "tc_brain"},
+            {"id": "feed", "type": "tc_feed"},
+        ],
+        "edges": list(reversed(GOOD)),
+    }))
+    b = _bp(GOOD)
+    ra, rb = compile_blueprint(a), compile_blueprint(b)
+    assert ra.ok and rb.ok and ra.order == rb.order
 ```
+
+（后两个测试为 Task 4 审查后 sanctioned deviation：DUP_INPUT 检查 + 规范拓扑序声明不变性。）
 
 - [ ] **Step 2: 运行确认失败**
 
@@ -635,15 +659,30 @@ def compile_blueprint(bp: BlueprintSpec, *, bars_per_day: int = 1440) -> Compile
 
     defs = {n.id: REGISTRY[n.type] for n in bp.nodes}
     bindings: dict[str, list[InputBinding]] = {n.id: [] for n in bp.nodes}
+    taken: set[tuple[str, str]] = set()
     for e in bp.edges:
         src_ok = e.src.node_id in defs and e.src.port in defs[e.src.node_id].outputs
         dst_ok = e.dst.node_id in defs and e.dst.port in defs[e.dst.node_id].inputs
         if not src_ok or not dst_ok:
+            bad_node = e.src.node_id if not src_ok else e.dst.node_id
+            hint = None
+            if bad_node in defs:
+                d = defs[bad_node]
+                hint = (f"Node {bad_node!r} has inputs {sorted(d.inputs)} "
+                        f"and outputs {sorted(d.outputs)}.")
             errors.append(CompileError(
                 "BAD_PORT_REF",
                 f"edge {e.src.node_id}.{e.src.port} -> {e.dst.node_id}.{e.dst.port} references unknown node/port",
-                node_id=(e.src.node_id if not src_ok else e.dst.node_id)))
+                node_id=bad_node, fix_hint=hint))
             continue
+        key = (e.dst.node_id, e.dst.port)
+        if key in taken:
+            errors.append(CompileError(
+                "DUP_INPUT", f"input port {e.dst.node_id}.{e.dst.port} is wired more than once",
+                node_id=e.dst.node_id, port=e.dst.port,
+                fix_hint="Each input port accepts exactly one incoming edge; remove the extra edge."))
+            continue
+        taken.add(key)
         t_out = defs[e.src.node_id].outputs[e.src.port]
         t_in = defs[e.dst.node_id].inputs[e.dst.port]
         if t_out is not t_in:
@@ -659,13 +698,19 @@ def compile_blueprint(bp: BlueprintSpec, *, bars_per_day: int = 1440) -> Compile
         return CompileResult(False, errors)
 
     deps = {n.id: {b.src_node for b in bindings[n.id] if not b.feedback} for n in bp.nodes}
+    ts = TopologicalSorter(deps)
     try:
-        order = list(TopologicalSorter(deps).static_order())
+        ts.prepare()
     except CycleError as ce:
         return CompileResult(False, [CompileError(
             "ILLEGAL_CYCLE", f"cycle without feedback edge: {ce.args[1]}",
             fix_hint="Mark exactly the intentional back edge with \"feedback\": true; "
                      "feedback values are delivered on the NEXT bar.")])
+    order: list[str] = []
+    while ts.is_active():                 # 排序波次 Kahn：规范拓扑序
+        ready = sorted(ts.get_ready())    # 跨进程/跨声明序确定（录制回放依赖）
+        order.extend(ready)
+        ts.done(*ready)
     return CompileResult(True, [], order, bindings,
                          nodes={n.id: n for n in bp.nodes})
 ```
@@ -673,7 +718,7 @@ def compile_blueprint(bp: BlueprintSpec, *, bars_per_day: int = 1440) -> Compile
 - [ ] **Step 4: 运行确认通过**
 
 Run: `cd backend && .venv/Scripts/python -m pytest tests/test_compiler_typecheck.py -q`
-Expected: `5 passed`（其余测试文件不回归）
+Expected: `7 passed`（其余测试文件不回归，全量 15 passed）
 
 - [ ] **Step 5: Commit**
 
@@ -2584,3 +2629,4 @@ git tag d1-complete
 9. D2 前端将复用 Hindsight 设计系统；Studio 画布节点分类颜色 = registry category（data/indicator/decision/risk/execution）。
 10. LLM 节点（D3）的 CostAnnotation 必须如实填写（llm_calls_per_bar≥1, deterministic=False），成本证书的可信度靠注解纪律维持；D3 加"注解审计"测试（LLM 类节点禁止声明 deterministic=True）。
 11. 因果类型系统 D1 交付**运行时守卫**（check_stamped + 恶意节点测试）；spec §3.1 提到的"编译器对窗口类操作做静态越界检查"排 D3（节点声明 lookback 元数据后编译器才有静态分析素材）——对外表述统一为"runtime-enforced, compiler-assisted"，不要吹成纯编译期。
+12. **Task 4 审查遗留（D3 增强项）**：①MISSING_INPUT 检查（未连接的必需输入编译报警）需先设计 optional-port 元数据（D3 LLM 节点有可选上下文口），一并做；②UNKNOWN_NODE_TYPE 的可用类型列表 `[:20]` 截断加 "(+N more)" 标记；③TYPE_MISMATCH 通用 fix_hint 可从 REGISTRY 反查产出该类型的节点列表。
