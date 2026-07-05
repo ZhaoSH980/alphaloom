@@ -65,7 +65,7 @@ alphaloom/
 - SPA fallback：非 /api、非 /ws 路径服务 `frontend/dist`（不存在时返回提示 JSON）
 
 **WS 面** `WS /ws/runs/{run_id}`：
-- server→client：`{"type":"bar","idx","ts","close","equity","active":[node_id],"fills":[{side,qty,price,tag}]}`（每 bar 一条，service 每 bar sleep playback_ms 毫秒，0=不限速）；`{"type":"paused","node_id","event_idx","inputs":{port: any}}`；`{"type":"status","status"}`；`{"type":"done","report"}`；`{"type":"error","message"}`
+- server→client：`{"type":"bar","idx","ts","close","equity","active":[node_id],"fills":[{side,qty,price,tag}]}`（每 bar 一条，service 每 bar sleep playback_ms 毫秒，0=不限速）；`{"type":"paused","node_id","ts","inputs":{port: any}}`（ts=bar 收盘毫秒；**不叫 event_idx**——与 trace API 的 bar 计数器不同轴，避免前端错配查询）；`{"type":"status","status"}`；`{"type":"done","report"}`；`{"type":"error","message"}`
 - client→server：`{"cmd":"resume"}` / `{"cmd":"step"}` / `{"cmd":"stop"}`
 - **断点桥语义**：POST /api/runs 带非空 breakpoints 或 step 意图时，Engine 以 `breakpoints=set(全部节点)` 构造；`BreakBridge.on_pause(node_id,...)` 内部过滤——仅当 `node_id ∈ user_breakpoints` 或 `step_mode` 时真正阻塞（`threading.Event.wait()`）；`step` 命令 = 放行一次并置 `step_mode=True`（下一节点即停）；`resume` = 放行并 `step_mode=False`；on_pause 回调整体 try/except 自吞（Carryover 14②）。run 线程异常 → status=failed + error 记录（Engine 崩溃契约）。
 
@@ -390,7 +390,7 @@ def test_break_bridge_pause_resume(tmp_path):
     assert ev["node_id"] == "risk" and "signal" in ev["inputs"]
     svc.command(run_id, "step")            # 放行一次，下一节点即停
     ev2 = _wait_for(events, "paused", 15)
-    assert ev2["node_id"] != "risk" or ev2["event_idx"] != ev["event_idx"]
+    assert ev2["node_id"] != "risk" or ev2["ts"] != ev["ts"]
     svc.command(run_id, "resume")          # 之后每次 risk 命中仍会停 → 连续 resume 清完
     deadline = time.time() + 30
     while time.time() < deadline:
@@ -399,6 +399,19 @@ def test_break_bridge_pause_resume(tmp_path):
         svc.command(run_id, "resume")
         time.sleep(0.05)
     assert svc.store.get(run_id)["status"] == "completed"
+
+def test_raising_sink_does_not_kill_run(tmp_path):
+    db_path = _db(tmp_path, n=40)
+    svc = RunService(store=RunsStore(tmp_path / "runs.sqlite"),
+                     db_path=db_path, record_dir=tmp_path)
+    bp = load_loom_file(REPO / "blueprints" / "ema_cross.loom")
+    def evil_sink(event):
+        raise RuntimeError("ws is gone")
+    run_id = svc.start(bp, _params(tmp_path), sink=evil_sink)
+    svc.join(run_id, timeout=30)
+    row = svc.store.get(run_id)
+    assert row["status"] == "completed"          # 推送失败绝不杀回测
+    assert run_id not in svc._bridges            # 无 bridge 泄漏
 
 def _wait_for(q, typ, timeout):
     deadline = time.time() + timeout
@@ -502,8 +515,10 @@ class BreakBridge:
             if not self.step_mode and node_id not in self.user_breakpoints:
                 return
             self._gate.clear()
+            if self._stopped:
+                return            # stop TOCTOU 闭合：clear 后复检（T2 审查 Important-2）
             self._sink({"type": "paused", "node_id": node_id,
-                        "event_idx": getattr(ev, "ts_close", 0),
+                        "ts": getattr(ev, "ts_close", 0),
                         "inputs": sanitize(_jsonable(inputs))})
             self._gate.wait()
         except Exception:
@@ -527,6 +542,15 @@ def _jsonable(obj):
         return obj
     except (TypeError, ValueError):
         return repr(obj)
+
+def _safe_sink(sink):
+    """sink 是推送路径（WS），它的任何异常都不得影响 run 本身（T2 审查 Important-1）。"""
+    def safe(event):
+        try:
+            sink(event)
+        except Exception:
+            pass
+    return safe
 
 class RunService:
     def __init__(self, store, db_path, record_dir):
@@ -560,6 +584,7 @@ class RunService:
             t.join(timeout)
 
     def _worker(self, run_id, bp, params, sink, bridge):
+        sink = _safe_sink(sink)
         sink({"type": "status", "status": "running"})
         try:
             source = SQLiteMarketData(self.db_path)
@@ -604,7 +629,7 @@ class RunService:
 - [ ] **Step 4: 全量回归**
 
 Run: `cd backend && .venv/Scripts/python -m pytest -q`
-Expected: 77 passed（73 + 4）
+Expected: 78 passed（73 + 5）
 
 - [ ] **Step 5: Commit**
 
@@ -1022,7 +1047,7 @@ if __name__ == "__main__":
 - [ ] **Step 5: 运行确认通过**
 
 Run: `cd backend && .venv/Scripts/python -m pytest tests/test_api_rest.py -q`
-Expected: `7 passed`；全量 84 passed
+Expected: `7 passed`；全量 85 passed
 
 - [ ] **Step 6: Commit**
 
@@ -1094,7 +1119,7 @@ def test_ws_breakpoint_pause_resume(client):
         assert paused["node_id"] == "risk" and "signal" in paused["inputs"]
         ws.send_json({"cmd": "step"})
         paused2 = _collect_until(ws, "paused")
-        assert (paused2["node_id"], paused2["event_idx"]) != (paused["node_id"], paused["event_idx"])
+        assert (paused2["node_id"], paused2["ts"]) != (paused["node_id"], paused["ts"])
         ws.send_json({"cmd": "stop"})
         end = _collect_until(ws, "done")
         assert end["report"]["bars"] == 60
@@ -1178,7 +1203,7 @@ sink 侧同步改造（app.py `_sink_for`）：
 - [ ] **Step 4: 全量回归**
 
 Run: `cd backend && .venv/Scripts/python -m pytest -q`
-Expected: 87 passed（84 + 3）
+Expected: 88 passed（85 + 3）
 
 - [ ] **Step 5: Commit**
 
@@ -1698,13 +1723,13 @@ export default function CertPanel({ cert }: { cert: Record<string, unknown> | nu
 // frontend/src/components/PausedInspector.tsx
 import { useLang } from "../lib/i18n";
 export default function PausedInspector({ ev, onCmd }: {
-  ev: { node_id: string; event_idx: number; inputs: Record<string, unknown> } | null;
+  ev: { node_id: string; ts: number; inputs: Record<string, unknown> } | null;
   onCmd: (c: "resume" | "step" | "stop") => void }) {
   const { t } = useLang();
   if (!ev) return null;
   return (
     <div className="panel p-3 border-loom-amber/60 space-y-2">
-      <div className="hud-label text-loom-amber">{t("paused")} · {ev.node_id} @ {ev.event_idx}</div>
+      <div className="hud-label text-loom-amber">{t("paused")} · {ev.node_id} @ {ev.ts}</div>
       <pre className="text-[10px] font-mono text-slate-300 max-h-48 overflow-auto whitespace-pre-wrap">
         {JSON.stringify(ev.inputs, null, 2)}
       </pre>
@@ -2238,7 +2263,7 @@ backend\.venv\Scripts\python -m uvicorn alphaloom.serve:app --port 8000 --app-di
 - [ ] **Step 3: 全站走查（审查者与实现者都要跑）**
 
 1. `backend/.venv/Scripts/python scripts/ensure_demo_db.py` → demo 库就绪
-2. 后端全量 `pytest -q` → 88 passed（87 + serve 1）
+2. 后端全量 `pytest -q` → 89 passed（88 + serve 1）
 3. 前端 `npx vitest run && npm run build` → 绿
 4. 用 preview 工具（launch.json 双服务）或手动走查清单：
    - Studio 载入 → 面板见 10 节点分组 → gallery 载入 ema_cross → 编译绿 + 证书 deterministic 100%
