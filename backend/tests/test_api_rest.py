@@ -102,3 +102,23 @@ def test_run_compile_failure_422(client):
 
 def test_unknown_run_404(client):
     assert client.get("/api/runs/nope").status_code == 404
+
+def test_spa_fallback_no_path_traversal(tmp_path):
+    # T3 审查 Critical-1 回归：编码穿越不得读出 dist 之外的文件
+    dist = tmp_path / "dist"; dist.mkdir()
+    (dist / "index.html").write_text("<html>ok</html>", encoding="utf-8")
+    (tmp_path / "SECRET.txt").write_text("TOP-SECRET", encoding="utf-8")
+    app = create_app(db_path=tmp_path / "d.sqlite", runs_db=tmp_path / "r.sqlite",
+                     record_dir=tmp_path, blueprints_dir=REPO / "blueprints",
+                     user_blueprints_dir=tmp_path / "ubp", frontend_dist=dist)
+    c = TestClient(app)
+    for evil in ["..%2FSECRET.txt", "%2e%2e%2fSECRET.txt", "..%2F..%2FSECRET.txt"]:
+        r = c.get(f"/{evil}")
+        assert "TOP-SECRET" not in r.text, evil
+    assert "ok" in c.get("/anything/deep").text   # SPA fallback 正常路径不受影响
+
+def test_run_window_bounds_rejected(client):
+    loom = json.loads((REPO / "blueprints" / "ema_cross.loom").read_text(encoding="utf-8"))
+    r = client.post("/api/runs", json={"blueprint": loom, "inst": "BTC-USDT-SWAP",
+                                       "bar": "1m", "end_ms": 10**19})
+    assert r.status_code == 422

@@ -35,3 +35,6 @@ class SQLiteMarketData(DataSource):
             "SELECT MIN(ts), MAX(ts) FROM candles WHERE inst=? AND bar=?",
             (inst, bar)).fetchone()
         return None if row[0] is None else (row[0], row[1])
+
+    def close(self) -> None:
+        self._db.close()

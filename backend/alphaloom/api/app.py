@@ -121,12 +121,15 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         limit = max(1, min(int(limit), 5000))
         from alphaloom.data.sqlite_source import SQLiteMarketData
         src = SQLiteMarketData(db_path)
-        rows = []
-        for c in src.iter_candles(inst, bar, start, end):
-            rows.append(c)
-            if len(rows) >= limit:
-                break
-        return rows
+        try:
+            rows = []
+            for c in src.iter_candles(inst, bar, start, end):
+                rows.append(c)
+                if len(rows) >= limit:
+                    break
+            return rows
+        finally:
+            src.close()
 
     @app.post("/api/runs")
     def run_start(body: RunIn):
@@ -177,8 +180,10 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             q += " AND event_idx=?"; args.append(event_idx)
         q += " ORDER BY event_idx, rowid LIMIT ?"
         args.append(max(1, min(int(limit), 2000)))
-        rows = db.execute(q, args).fetchall()
-        db.close()
+        try:
+            rows = db.execute(q, args).fetchall()
+        finally:
+            db.close()
         out = []
         for r_id, idx, ts, nid, ij, oj in rows:
             out.append({"event_idx": idx, "ts": ts, "node_id": nid,
@@ -196,8 +201,10 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         dist = Path(frontend_dist)
         if path.startswith(("api/", "ws/")):
             raise HTTPException(404)
-        candidate = dist / path
-        if path and candidate.is_file():
+        dist_root = dist.resolve()
+        candidate = (dist / path).resolve()
+        # 收容检查：编码穿越（%2F/%2e）在 uvicorn 解码后会以字面 ../ 到达这里（T3 审查 Critical-1）
+        if path and candidate.is_file() and candidate.is_relative_to(dist_root):
             return FileResponse(candidate)
         index = dist / "index.html"
         if index.is_file():
