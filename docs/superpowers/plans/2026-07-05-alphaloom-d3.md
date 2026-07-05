@@ -297,3 +297,10 @@ nodes/llm_nodes.py：LLMAnalystNode（type=llm_analyst, category=decision, input
 - 真实讯飞配置（Hindsight .env 同源）：model=`astron-code-latest`，base_url=xf-yun 编码 API。**OFFLINE_DEFAULTS model 必须从 `spark-x1` 改 `astron-code-latest`**（sanctioned，llm/client.py）——录制 key 嵌 model 串，不改则离线 replay 全 miss。
 - 真实录制是**控制器任务**（涉及用户密钥+付费调用）：①T11 fake-seed 基础设施先落地（seed_recordings.py 结构/demo 蓝图/gitignore 例外/离线验证 harness 可复用）②控制器建 alphaloom/.env（copy hindsight/.env，gitignore 绝不入库）③真实 transport 跑 seed，**窗口要小**（committee=3 调用/bar，控制在少量 bar，429 耐心退避 15/30/60s）④验证 ALPHALOOM_OFFLINE=1 全命中零配额⑤提交 llm_calls.sqlite（gitignore 例外）不提交 .env⑥密钥扫描确认零泄漏。
 - 面试叙事：录制来自真实讯飞 astron-code-latest 调用，离线路径零配额回放逐字节一致（Hindsight 同款诚实模式）；插自己 key 可 re-record/走 live。
+
+## T11 真实录制执行结果（控制器 2026-07-05）
+- **真实讯飞验证**：用用户 .env 的真实 astron-code-latest 端点跑了 154 次真实调用（agent_committee 51-bar 委员会 153 调 + copilot 生成 1 调），全部成功，管线对真实 LLM 工作。真实 LLM 在该 51-bar 窗口保守（全 flat/hold，0 交易）——真实行为，非 bug。copilot 首次即产合法风控图（真 LLM 够强，未触发自修复）。
+- **提交的离线演示 = spark-x1 确定性种子**（793 条，seed_recordings.py --verify 验证 903 命中 0 miss 零配额）：富演示含交易/48 否决/46 反思四象限/copilot 自修复（坏图→TYPE_MISMATCH→修正），可复现、任何机器零配额、无需密钥。
+- **合并库**：llm_calls.sqlite = 793 spark-x1（默认离线演示）+ 154 astron（真实讯飞验证记录），model 串不同不冲突。OFFLINE_DEFAULTS=spark-x1（默认走富演示）。
+- **诚实框定（README）**：离线 showcase 用确定性种子响应（清楚标注非真实 LLM 输出，为可复现零配额演示）；管线已对真实讯飞 astron-code-latest 验证（154 真调）。用户可用自己 key 走 live 或 re-record 更长真实窗口。
+- **D4 note**：astron 真实录制的独立离线回放与 seed 脚本代码路径有细微差异未逐一对齐（committee chair handoff 的 request 复现），D4 若要"真实录制可复现回放"需统一 real/fake 两条录制路径的代码。密钥扫描：录制库 0、git 历史 0。
