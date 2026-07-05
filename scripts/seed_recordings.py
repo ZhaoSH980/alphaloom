@@ -259,7 +259,18 @@ def seed(*, overwrite: bool = True) -> dict:
 
     RECORD_DB.parent.mkdir(parents=True, exist_ok=True)
     if overwrite and RECORD_DB.exists():
-        RECORD_DB.unlink()  # 幂等：删旧库重建（避免陈旧条目串味）
+        # 幂等：只删本脚本 model 的确定性种子行，**保留其他 model 的真实录制**
+        # （如真实讯飞 astron-code-latest 录制——绝不能被种子重建冲掉，否则回退诚实修复）。
+        import json as _json
+        import sqlite3 as _sqlite3
+        _conn = _sqlite3.connect(RECORD_DB)
+        try:
+            _rows = _conn.execute("SELECT hash, request_json FROM llm_calls").fetchall()
+            _stale = [h for h, rj in _rows if _json.loads(rj).get("model") == MODEL]
+            _conn.executemany("DELETE FROM llm_calls WHERE hash=?", [(h,) for h in _stale])
+            _conn.commit()
+        finally:
+            _conn.close()
 
     if not DEMO_MARKET_DB.exists():
         raise SystemExit(
