@@ -17,14 +17,18 @@ class PaperBroker:
         self._last_close = 0.0
 
     def submit(self, order: Order) -> bool:
+        if order.qty <= 0:
+            return False
         if self._halted:
             return False
         self._pending.append(order)
         return True
 
     def halt(self, reason: str) -> None:
+        """熔断=冻结：清挂单、拒新单、持仓保留现场。"""
         self._halted = True
         self._halt_reason = reason
+        self._pending.clear()
 
     @property
     def halted(self) -> bool:

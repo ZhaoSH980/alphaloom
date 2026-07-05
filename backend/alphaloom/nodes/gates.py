@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 from collections import deque
 from alphaloom.graph.types import PinType
 from alphaloom.nodes.registry import node
@@ -79,13 +80,20 @@ class RiskGateNode:
     def on_bar(self, ctx, inputs):
         sig = dict(inputs["signal"])
         checks: list[str] = []
-        if sig.get("side") not in ("long", "short", "flat", "hold"):
-            checks.append(f"unknown side {sig.get('side')!r}: must be one of long/short/flat/hold")
-        if sig["side"] in ("long", "short"):
-            if self.require_stop and sig.get("stop") is None:
+        side = sig.get("side")
+        if side not in ("long", "short", "flat", "hold"):
+            checks.append(f"unknown side {side!r}: must be one of long/short/flat/hold")
+        elif side in ("long", "short"):
+            qty = sig.get("qty", 0.0)
+            stop = sig.get("stop")
+            if not isinstance(qty, (int, float)) or not math.isfinite(qty) or qty < 0:
+                checks.append(f"qty {qty!r} must be a finite non-negative number")
+            elif qty > self.max_qty:
+                checks.append(f"qty {qty} exceeds max_qty {self.max_qty}")
+            if self.require_stop and stop is None:
                 checks.append("missing stop: attach a stop-loss to every entry signal")
-            if sig.get("qty", 0) > self.max_qty:
-                checks.append(f"qty {sig['qty']} exceeds max_qty {self.max_qty}")
+            elif stop is not None and (not isinstance(stop, (int, float)) or not math.isfinite(stop)):
+                checks.append(f"stop {stop!r} must be a finite number")
         blocked = bool(checks)
         if blocked:
             sig = _sig("hold", reason="blocked by risk gate")

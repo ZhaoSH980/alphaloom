@@ -25,6 +25,7 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
 
     import alphaloom.nodes  # noqa: F401
+    from alphaloom.api.serialize import sanitize
     from alphaloom.data.source import bar_to_ms
     from alphaloom.graph.compiler import compile_blueprint
     from alphaloom.graph.model import load_loom_file
@@ -35,7 +36,7 @@ def main(argv=None) -> int:
         print(json.dumps({
             "ok": r.ok,
             "errors": [e.to_dict() for e in r.errors],
-            "certificate": r.certificate.to_dict() if r.certificate else None,
+            "certificate": sanitize(r.certificate.to_dict()) if r.certificate else None,
             "order": r.order,
         }, ensure_ascii=False, indent=2))
         return 0 if r.ok else 1
@@ -53,7 +54,7 @@ def main(argv=None) -> int:
         return 1
     print(json.dumps({"ok": True, "run_id": report.run_id, "bars": report.bars,
                       "certificate": report.certificate,
-                      "summary": report.summary}, ensure_ascii=False, indent=2))
+                      "summary": sanitize(report.summary)}, ensure_ascii=False, indent=2))
     return 0
 
 if __name__ == "__main__":

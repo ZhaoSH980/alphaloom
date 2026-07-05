@@ -33,10 +33,17 @@ class Recorder:
         if node_id:
             q += " AND node_id=?"
             args.append(node_id)
-        q += " ORDER BY event_idx"
+        q += " ORDER BY event_idx, rowid"
         cur = self._db.execute(q, args)
         cols = [c[0] for c in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def close(self):
         self._db.close()
+
+def from_json(text: str) -> dict:
+    def hook(d):
+        if set(d) == {"__stamped__", "value"}:
+            return Stamped(d["value"], d["__stamped__"])
+        return d
+    return json.loads(text, object_hook=hook)

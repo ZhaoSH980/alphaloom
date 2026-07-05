@@ -5,6 +5,9 @@ from alphaloom.graph.compiler import CompileResult
 from alphaloom.runtime.context import RunContext, check_stamped
 from alphaloom.runtime.events import BarEvent
 
+class EngineDead(RuntimeError):
+    """引擎已崩溃（毒化契约 Carryover 14①）：实例必须弃用。"""
+
 class Engine:
     def __init__(self, compiled: CompileResult, instances: dict, ctx: RunContext,
                  breakpoints: set[str] | None = None, on_pause=None):
@@ -16,12 +19,22 @@ class Engine:
         self.after_node = None            # 测试/调试钩子
         self._prev: dict[tuple[str, str], Stamped | None] = {}
         self._event_idx = 0
+        self._dead = False
 
     def run(self, events) -> None:
         for ev in events:
             self.step(ev)
 
     def step(self, ev: BarEvent) -> None:
+        if self._dead:
+            raise EngineDead("engine crashed earlier; discard this instance (crash contract)")
+        try:
+            self._step_inner(ev)
+        except Exception:
+            self._dead = True
+            raise
+
+    def _step_inner(self, ev: BarEvent) -> None:
         self.ctx.clock.advance(ev.ts_close)
         self.ctx.current_event = ev
         wave: dict[tuple[str, str], Stamped] = {}

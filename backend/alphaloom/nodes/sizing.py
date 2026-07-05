@@ -17,5 +17,7 @@ class PositionSizerNode:
         if dist <= 0:
             return {"sized": dict(sig, side="hold", reason="zero stop distance")}
         equity = ctx.broker.equity() if ctx.broker else 10_000.0
+        if equity <= 0:
+            return {"sized": dict(sig, side="hold", reason="non-positive equity")}
         sig["qty"] = equity * self.risk_pct / dist
         return {"sized": sig}
