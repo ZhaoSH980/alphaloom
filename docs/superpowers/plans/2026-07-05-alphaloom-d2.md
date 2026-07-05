@@ -644,6 +644,7 @@ git add -A && git commit -m "feat(api): runs store + run service with break brid
 **Files:**
 - Create: `backend/alphaloom/api/schemas.py`, `backend/alphaloom/api/app.py`, `scripts/ensure_demo_db.py`
 - Modify: `backend/pyproject.toml`（dependencies 加 `"fastapi>=0.115"`, `"uvicorn>=0.30"`；dev 加 `"httpx>=0.27"`）
+- Modify: `backend/alphaloom/data/sqlite_source.py`（T3 审查 Minor-2 sanctioned：加 `def close(self) -> None: self._db.close()`）
 - Test: `backend/tests/test_api_rest.py`
 
 - [ ] **Step 1: 安装依赖**
@@ -759,6 +760,26 @@ def test_run_compile_failure_422(client):
 
 def test_unknown_run_404(client):
     assert client.get("/api/runs/nope").status_code == 404
+
+def test_spa_fallback_no_path_traversal(tmp_path):
+    # T3 审查 Critical-1 回归：编码穿越不得读出 dist 之外的文件
+    dist = tmp_path / "dist"; dist.mkdir()
+    (dist / "index.html").write_text("<html>ok</html>", encoding="utf-8")
+    (tmp_path / "SECRET.txt").write_text("TOP-SECRET", encoding="utf-8")
+    app = create_app(db_path=tmp_path / "d.sqlite", runs_db=tmp_path / "r.sqlite",
+                     record_dir=tmp_path, blueprints_dir=REPO / "blueprints",
+                     user_blueprints_dir=tmp_path / "ubp", frontend_dist=dist)
+    c = TestClient(app)
+    for evil in ["..%2FSECRET.txt", "%2e%2e%2fSECRET.txt", "..%2F..%2FSECRET.txt"]:
+        r = c.get(f"/{evil}")
+        assert "TOP-SECRET" not in r.text, evil
+    assert "ok" in c.get("/anything/deep").text   # SPA fallback 正常路径不受影响
+
+def test_run_window_bounds_rejected(client):
+    loom = json.loads((REPO / "blueprints" / "ema_cross.loom").read_text(encoding="utf-8"))
+    r = client.post("/api/runs", json={"blueprint": loom, "inst": "BTC-USDT-SWAP",
+                                       "bar": "1m", "end_ms": 10**19})
+    assert r.status_code == 422
 ```
 
 - [ ] **Step 3: 运行确认失败**
@@ -784,8 +805,8 @@ class RunIn(BaseModel):
     blueprint: dict
     inst: str
     bar: str = "1m"
-    start_ms: int | None = None
-    end_ms: int | None = None
+    start_ms: int | None = Field(default=None, ge=0, le=4_102_444_800_000)   # ≤2100 年，防 int64 溢出穿到 sqlite
+    end_ms: int | None = Field(default=None, ge=0, le=4_102_444_800_000)
     cash: float = 10_000.0
     fee_rate: float = 0.0005
     breakpoints: list[str] = Field(default_factory=list)
@@ -916,12 +937,15 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         limit = max(1, min(int(limit), 5000))
         from alphaloom.data.sqlite_source import SQLiteMarketData
         src = SQLiteMarketData(db_path)
-        rows = []
-        for c in src.iter_candles(inst, bar, start, end):
-            rows.append(c)
-            if len(rows) >= limit:
-                break
-        return rows
+        try:
+            rows = []
+            for c in src.iter_candles(inst, bar, start, end):
+                rows.append(c)
+                if len(rows) >= limit:
+                    break
+            return rows
+        finally:
+            src.close()
 
     @app.post("/api/runs")
     def run_start(body: RunIn):
@@ -972,8 +996,10 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             q += " AND event_idx=?"; args.append(event_idx)
         q += " ORDER BY event_idx, rowid LIMIT ?"
         args.append(max(1, min(int(limit), 2000)))
-        rows = db.execute(q, args).fetchall()
-        db.close()
+        try:
+            rows = db.execute(q, args).fetchall()
+        finally:
+            db.close()
         out = []
         for r_id, idx, ts, nid, ij, oj in rows:
             out.append({"event_idx": idx, "ts": ts, "node_id": nid,
@@ -991,8 +1017,10 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         dist = Path(frontend_dist)
         if path.startswith(("api/", "ws/")):
             raise HTTPException(404)
-        candidate = dist / path
-        if path and candidate.is_file():
+        dist_root = dist.resolve()
+        candidate = (dist / path).resolve()
+        # 收容检查：编码穿越（%2F/%2e）在 uvicorn 解码后会以字面 ../ 到达这里（T3 审查 Critical-1）
+        if path and candidate.is_file() and candidate.is_relative_to(dist_root):
             return FileResponse(candidate)
         index = dist / "index.html"
         if index.is_file():
@@ -1047,7 +1075,7 @@ if __name__ == "__main__":
 - [ ] **Step 5: 运行确认通过**
 
 Run: `cd backend && .venv/Scripts/python -m pytest tests/test_api_rest.py -q`
-Expected: `7 passed`；全量 85 passed
+Expected: `9 passed`；全量 87 passed
 
 - [ ] **Step 6: Commit**
 
@@ -1203,7 +1231,7 @@ sink 侧同步改造（app.py `_sink_for`）：
 - [ ] **Step 4: 全量回归**
 
 Run: `cd backend && .venv/Scripts/python -m pytest -q`
-Expected: 88 passed（85 + 3）
+Expected: 90 passed（87 + 3）
 
 - [ ] **Step 5: Commit**
 
@@ -2263,7 +2291,7 @@ backend\.venv\Scripts\python -m uvicorn alphaloom.serve:app --port 8000 --app-di
 - [ ] **Step 3: 全站走查（审查者与实现者都要跑）**
 
 1. `backend/.venv/Scripts/python scripts/ensure_demo_db.py` → demo 库就绪
-2. 后端全量 `pytest -q` → 89 passed（88 + serve 1）
+2. 后端全量 `pytest -q` → 91 passed（90 + serve 1）
 3. 前端 `npx vitest run && npm run build` → 绿
 4. 用 preview 工具（launch.json 双服务）或手动走查清单：
    - Studio 载入 → 面板见 10 节点分组 → gallery 载入 ema_cross → 编译绿 + 证书 deterministic 100%
