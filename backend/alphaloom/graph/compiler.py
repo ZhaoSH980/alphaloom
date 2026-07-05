@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from graphlib import TopologicalSorter, CycleError
-from alphaloom.graph.model import BlueprintSpec
+from alphaloom.graph.model import BlueprintSpec, EdgeSpec, NodeSpec, PortRef, loads_loom
 from alphaloom.graph.errors import CompileError
 from alphaloom.graph.types import PinType
 from alphaloom.nodes.registry import REGISTRY
@@ -28,7 +28,58 @@ _HINTS = {
         "RiskGate node. Route the signal through a RiskGate before this node."),
 }
 
+_MAX_DEPTH = 8
+
+def _parse_ref_str(s: str) -> PortRef:
+    n, p = s.split(".")
+    return PortRef(n, p)
+
+def _expand_subgraphs(bp, depth=0):
+    if depth > _MAX_DEPTH:
+        return None, [CompileError("PARAM_INVALID", f"subgraph nesting exceeds {_MAX_DEPTH}",
+                                   fix_hint="Flatten your subgraph hierarchy.")]
+    if not any(n.type == "subgraph" for n in bp.nodes):
+        return bp, []
+    import json as _json
+    nodes, edges, errors = [], [], []
+    in_map, out_map = {}, {}
+    for n in bp.nodes:
+        if n.type != "subgraph":
+            nodes.append(n)
+            continue
+        try:
+            inner = loads_loom(_json.dumps(n.params["blueprint"]))
+        except Exception as exc:
+            errors.append(CompileError("PARAM_INVALID", f"subgraph {n.id}: bad blueprint ({exc})",
+                                       node_id=n.id))
+            continue
+        inner, sub_errs = _expand_subgraphs(inner, depth + 1)
+        if sub_errs:
+            errors.extend(sub_errs)
+            continue
+        pre = f"{n.id}/"
+        nodes.extend(NodeSpec(pre + m.id, m.type, m.params) for m in inner.nodes)
+        edges.extend(EdgeSpec(PortRef(pre + e.src.node_id, e.src.port),
+                              PortRef(pre + e.dst.node_id, e.dst.port), e.feedback)
+                     for e in inner.edges)
+        for outer_port, ref in n.params.get("inputs", {}).items():
+            r = _parse_ref_str(ref)
+            in_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
+        for outer_port, ref in n.params.get("outputs", {}).items():
+            r = _parse_ref_str(ref)
+            out_map[PortRef(n.id, outer_port)] = PortRef(pre + r.node_id, r.port)
+    if errors:
+        return None, errors
+    for e in bp.edges:
+        edges.append(EdgeSpec(out_map.get(e.src, e.src), in_map.get(e.dst, e.dst), e.feedback))
+    flat = BlueprintSpec(bp.id, bp.name, nodes, edges, bp.meta)
+    return _expand_subgraphs(flat, depth + 1)
+
 def compile_blueprint(bp: BlueprintSpec, *, bars_per_day: int = 1440) -> CompileResult:
+    bp2, exp_errors = _expand_subgraphs(bp)
+    if exp_errors:
+        return CompileResult(False, exp_errors)
+    bp = bp2
     errors: list[CompileError] = []
     seen: set[str] = set()
     for n in bp.nodes:

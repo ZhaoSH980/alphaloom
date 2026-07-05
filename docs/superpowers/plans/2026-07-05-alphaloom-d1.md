@@ -733,6 +733,7 @@ git add -A && git commit -m "feat(compiler): structural+type checks, risk-stamp 
 **Files:**
 - Modify: `backend/alphaloom/graph/compiler.py`
 - Test: `backend/tests/test_compiler_subgraph.py`
+- Create: `backend/tests/__init__.py`（空；sanctioned deviation：无它时 pytest prepend 模式把测试文件按顶层模块名导入，与本任务测试的 `import tests.test_compiler_typecheck` 形成同文件双导入，tc_* 节点二次注册报 ValueError；加空 `__init__.py` 后 pytest 统一按 `tests.*` 导入，单次执行）
 
 子图约定：`NodeSpec.type == "subgraph"`，`params = {"blueprint": <内联 loom dict>, "inputs": {"外部入口": "内部节点.端口"}, "outputs": {"外部出口": "内部节点.端口"}}`。编译第一步展开：内部节点改名 `子图id/内部id`，外部指向子图端口的边重写到映射的内部端口；递归展开，深度上限 8。展开后统一走 Task 4 的检查。反馈环规则已在 Task 4 落地（TopologicalSorter 忽略 feedback 边），本任务补测试证明。
 
