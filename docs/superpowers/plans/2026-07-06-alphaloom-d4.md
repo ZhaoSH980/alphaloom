@@ -74,6 +74,8 @@
 > 5. **ReplayMissError 干净 4xx**：offline 客户端 + 空录制库（消融/进化臂的 LLM 调用未录，T8 才录）→ `ReplayMissError` 捕获转 **422**（带"re-run in record mode"解释），不是 500 栈。消融 offline 真实回放留 T8 录完才通，端点+测试先用注入 fake 走通。
 > 6. **规模超限 422 双保险**：pydantic 层 `population∈[1,4]`/`generations∈[1,3]`（`EvolveIn` Field 约束）先挡，evolve 内 ValueError（含窗口重叠）转 422 兜底。窗口边界沿用 RunIn 的 int64 溢出防护（`le=4_102_444_800_000`）。
 > 7. **T5 审查遗留必修（本任务内做）**：`evolve/lab.py` 孩子回测的运行期错误收容——变异 param 类型垃圾（如 `period="very fast"`）编译过（int 只是声明类型不校验值）但在 `create_instance/setup` 的 `int()` 处 ValueError，此前未捕获炸掉整棵谱系（API 暴露后网络可达 DoS）。修为：孩子回测包 `try/except`，炸了记 `compile_status="runtime_error"`（新增枚举值）、`fitness=None`、错误摘要入新增 `GenealogyNode.error` 字段、不进种群、**进化继续**；**seed 跑炸仍 raise**（种子坏是调用方错误）。`to_dict` 增 `error` 字段，React Flow 形状注意 `runtime_error` 新枚举。
+> 8. **C1（T6 审查 Critical）修复——沙箱自定义节点绕过 LLM 配额守门（网络可达刷真配额）**：沙箱 AST 不拦普通属性访问 `ctx.llm`，一个声称 `llm_calls_per_bar=0` 的沙箱节点能在 on_bar 偷调 `ctx.llm.chat` 刷爆讯飞配额（红队实锤：证书报 0 → 守门放行 → 真 LLM 被调 N 次 → 200）。守门信任根（成本证书）在沙箱节点在场时失效。**两层深度防御**：① **根治（引擎层）**——`NodeDef` 增 `sandboxed` 标记（`compile_node_source` 注册后 `mark_sandboxed` 回填），`create_instance` 传到实例，`engine._step_inner` 给沙箱节点一个 `_RestrictedContext`（委托真 ctx 但 `.llm`/`.audit` 访问抛 `SandboxEscapeError`）——沙箱节点运行期**真的够不到 LLM 句柄**（选运行期剥离而非 AST 名字拒绝：AST 拒可被 `c=ctx;c.llm` 别名绕过、且会误伤名为 `llm` 的无关变量；运行期剥离是硬保证，与"沙箱即合规官/不能伪造风控盖章"同款卖点）。② **守门兜底（app.py）**——`_needs_llm` 补充：蓝图含**任何** `NodeDef.sandboxed=True` 节点即按"可能烧配额"处理，非 offline 即 409（不信任沙箱节点自证，防未来同类信任缺口）。RED→GREEN 实锤：修复前该攻击链 leaderboard 返回 200 且 SpyLLM 被调 60 次；修复后 409 且 `spy.calls==0`。内置受信 LLM 节点（llm_analyst）不受剥离影响（拿真 ctx）；合法纯计算沙箱节点（`ctx=None` 或只用 clock/broker）零误伤（D3 沙箱 61 测试全绿）。
+> 9. **M1（T6 审查 Minor，记账不修）**：eval 端点无窗口跨度 / bar-count 上限——已记入 D4 Carryover #5（接实盘数据源前加 span/bar-count 硬上限）。
 
 **发布准备（不含公开推送）**：README banner/截图/GIF、docs/evaluation-methodology.md（统计局限诚实框定）、docs/demo-script.md（10 分钟 talk track）、docs/future-work.md、LICENSE 已有、CI workflow（pytest+前端构建）。**GitHub 公开推送留给用户一键执行**（不可逆对外发布）。
 
@@ -98,3 +100,8 @@
 2. 进化实验室扩规模（当前种群≤4 代数≤3 是演示锁定）。
 3. 沙箱完整资源限额（CPU/内存/超时 cgroup 级）——当前仅 AST + range 上限。
 4. 反事实分叉 UI（spec §3.3 创新③，D4 若溢出则 future-work）。
+5. **eval 端点窗口跨度 / bar-count 上限**（T6 审查 M1）——`/api/eval/*`（fidelity/
+   leaderboard/ablation）与 `/api/evolve` 目前无显式窗口跨度或 bar 数上限，靠 demo
+   DB 体量（≤400 bar）隐式兜底，非显式护栏。**接实盘/大体量数据源前**须加 span
+   或 bar-count 硬上限（对齐 evolve 的规模硬锁定精神），否则超长窗口会拖垮同步端点
+   （同步执行 + 线程池，单请求跑满一个 worker）。

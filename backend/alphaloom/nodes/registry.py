@@ -14,7 +14,7 @@ REGISTRY 视图），并入 D4 Carryover（沙箱资源限额批次）。届时 
 与 ``/api/nodes/custom`` 应带 session 键，隔离各租户的自定义节点。
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from alphaloom.graph.types import PinType, CostAnnotation
 from alphaloom.graph.model import NodeSpec
 
@@ -27,18 +27,24 @@ class NodeDef:
     outputs: dict[str, PinType]
     params: dict[str, type] = field(default_factory=dict)
     cost: CostAnnotation = CostAnnotation()
+    # 来源标记：True = 经 /api/nodes/custom 沙箱热注册的自定义节点（不受信）；
+    # False = 进程内置节点（受信）。守门层据此不信任沙箱节点的成本证书自证
+    # （沙箱节点可声明 llm_calls_per_bar=0 却运行期偷调 LLM——见 C1 修复），
+    # 且运行期给沙箱节点一个剥离 .llm/.audit 的受限 ctx 视图（engine.py）。
+    sandboxed: bool = False
 
 # 进程级单例：跨请求/跨 create_app/跨用户共享（单用户假设，见模块 docstring）。
 # 多用户部署需 session 命名空间（D4 Carryover）。
 REGISTRY: dict[str, NodeDef] = {}
 
 def node(*, type: str, category: str, inputs: dict, outputs: dict,
-         params: dict | None = None, cost: CostAnnotation = CostAnnotation()):
+         params: dict | None = None, cost: CostAnnotation = CostAnnotation(),
+         sandboxed: bool = False):
     def deco(cls):
         if type in REGISTRY:
             raise ValueError(f"node type {type!r} already registered")
         REGISTRY[type] = NodeDef(type, category, cls, dict(inputs), dict(outputs),
-                                 dict(params or {}), cost)
+                                 dict(params or {}), cost, sandboxed=sandboxed)
         cls.node_type = type
         return cls
     return deco
@@ -46,11 +52,19 @@ def node(*, type: str, category: str, inputs: dict, outputs: dict,
 def get_node_def(t: str) -> NodeDef:
     return REGISTRY[t]
 
+def mark_sandboxed(t: str) -> None:
+    """把已注册 type 标记为沙箱来源（不受信）。沙箱编译成功后调用——@node 装饰器
+    对内置/沙箱源码无差别，来源标记须由沙箱编译器在注册后回填。"""
+    d = REGISTRY.get(t)
+    if d is not None and not d.sandboxed:
+        REGISTRY[t] = replace(d, sandboxed=True)
+
 def create_instance(spec: NodeSpec):
     d = get_node_def(spec.type)
     inst = d.cls()
     inst.state = {}
     inst.node_id = spec.id
     inst.def_ = d
+    inst.sandboxed = bool(d.sandboxed)   # 引擎据此给沙箱节点受限 ctx（剥离 .llm）
     inst.setup(dict(spec.params))
     return inst

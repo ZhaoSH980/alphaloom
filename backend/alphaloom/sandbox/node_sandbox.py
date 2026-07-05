@@ -30,7 +30,7 @@ import builtins as _builtins
 from typing import Any
 
 from alphaloom.graph.types import CostAnnotation, PinType  # noqa: F401 (供源码 import)
-from alphaloom.nodes.registry import REGISTRY, NodeDef
+from alphaloom.nodes.registry import REGISTRY, NodeDef, mark_sandboxed
 from alphaloom.nodes.registry import node as _register_node
 from alphaloom.sandbox.errors import SandboxError
 
@@ -485,7 +485,12 @@ def compile_node_source(src: str) -> NodeDef | SandboxError:
                 f"GET /api/nodes and /api/compile for every subsequent caller)",
                 reason="bad_pin_type",
             )
-    return ndef
+
+    # 8) 来源标记：沙箱热注册的节点一律标 sandboxed=True（不受信）。运行期引擎据此
+    # 给它剥离 .llm 的受限 ctx（C1 根治：沙箱节点不能偷调 LLM），且守门层不信任其
+    # 成本证书自证（含任何沙箱节点的蓝图非 offline 即拒——app.py 深度防御兜底）。
+    mark_sandboxed(t)
+    return REGISTRY[t]
 
 
 def _rollback(before: set[str]) -> None:

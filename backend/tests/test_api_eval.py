@@ -500,3 +500,154 @@ def test_deterministic_endpoints_work_without_llm_client(tmp_path):
     assert client.post("/api/eval/fidelity", json={"run_id": run_id}).status_code == 200
     assert client.post("/api/eval/leaderboard",
                        json={"inst": "BTC-USDT-SWAP", "bar": "1m"}).status_code == 200
+
+
+# =========================================================================== #
+# C1（Critical）端到端：沙箱自定义节点绕过 LLM 配额守门（网络可达刷爆真配额）
+#
+# 攻击链：/api/nodes/custom 注册一个声称 llm_calls_per_bar=0 但 on_bar 偷调
+# ctx.llm.chat 的沙箱节点 → 放进类型合法蓝图打 /api/eval/leaderboard（非 offline
+# 客户端）。修复前：证书报 0 → 守门放行 → 真 LLM 被调、返回 200（刷爆配额）。
+# 修复后（两条防御）：#1 运行期剥离沙箱节点的 ctx.llm（偷调即 raise）；#2 守门不
+# 信任沙箱节点自证——含沙箱节点的蓝图非 offline 即 409（chat 根本没机会被调）。
+# =========================================================================== #
+class _SpyLLM:
+    """记录被调次数的假 LLM（offline=False）——守门/剥离失灵时 calls>0 即自证绕过。"""
+    offline = False
+
+    def __init__(self):
+        self.calls = 0
+
+    def chat(self, messages, tools=None, temperature=0.2, **params):
+        self.calls += 1
+        return {"choices": [{"message": {"content":
+                json.dumps({"side": "long", "rationale": "x", "confidence": 0.9})}}]}
+
+
+# 偷调 LLM 的恶意沙箱节点源码：cost 谎报 0，on_bar 却 ctx.llm.chat（AST 禁 .format，
+# 故用 dict 直构 messages）。输出 SIGNAL 以能连进类型合法蓝图（thief→sizer→risk→exec）。
+_THIEF_SOURCE = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="{tp}", category="decision",
+      inputs={{"candle": PinType.CANDLE}}, outputs={{"signal": PinType.SIGNAL}},
+      cost=CostAnnotation(llm_calls_per_bar=0, deterministic=True))
+class ThiefNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        ctx.llm.chat([{{"role": "user", "content": "burn quota"}}])
+        return {{"signal": {{"side": "long", "qty": 0.0, "stop": None, "reason": "stolen"}}}}
+'''
+
+# 纯净（不偷调）的沙箱节点：仅用于验证守门 #2 兜底——即便节点无害，含沙箱节点
+# 的蓝图也不受信（证书信任根在沙箱节点在场时失效，深度防御拒绝）。
+_PURE_SANDBOX_SOURCE = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="{tp}", category="indicator",
+      inputs={{"candle": PinType.CANDLE}}, outputs={{"value": PinType.SERIES}},
+      cost=CostAnnotation(llm_calls_per_bar=0, deterministic=True))
+class PureNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        return {{"value": float(inputs["candle"]["close"]) * 2.0}}
+'''
+
+
+def _thief_blueprint(tp):
+    """类型合法蓝图：feed → <thief:SIGNAL> → sizer → risk_gate → exec（过风控）。"""
+    return {
+        "id": "thief_bp_v1", "name": "thief-bp",
+        "nodes": [
+            {"id": "feed", "type": "candle_feed",
+             "params": {"inst": "BTC-USDT-SWAP", "bar": "1m"}},
+            {"id": "thief", "type": tp, "params": {}},
+            {"id": "sizer", "type": "position_sizer", "params": {"risk_pct": 0.02}},
+            {"id": "risk", "type": "risk_gate",
+             "params": {"max_qty": 100.0, "require_stop": True}},
+            {"id": "exec", "type": "execute_order", "params": {}},
+        ],
+        "edges": [
+            {"from": "feed.out", "to": "thief.candle"},
+            {"from": "thief.signal", "to": "sizer.signal"},
+            {"from": "feed.out", "to": "sizer.candle"},
+            {"from": "sizer.sized", "to": "risk.signal"},
+            {"from": "risk.stamped", "to": "exec.signal"},
+        ],
+        "meta": {},
+    }
+
+
+def test_c1_sandbox_node_quota_bypass_is_blocked_end_to_end(tmp_path):
+    """C1 端到端 RED→GREEN：注册偷调 LLM 的沙箱节点 → 打 leaderboard（非 offline
+    SpyLLM）→ 必须 409 拒绝，且 SpyLLM.chat 从未被调（calls==0）。修复前此路返回
+    200 且 calls>0（真配额被刷）。"""
+    from alphaloom.nodes.registry import REGISTRY
+    spy = _SpyLLM()
+    client = _make_app(tmp_path, llm_client=spy)
+    tp = f"thief_{uuid.uuid4().hex[:8]}"
+    try:
+        reg = client.post("/api/nodes/custom",
+                          json={"source": _THIEF_SOURCE.format(tp=tp)})
+        assert reg.status_code == 200, reg.text     # 沙箱允许它注册（普通属性访问不拦）
+        body = {"inst": "BTC-USDT-SWAP", "bar": "1m",
+                "blueprint": _thief_blueprint(tp), "blueprint_name": "thief"}
+        r = client.post("/api/eval/leaderboard", json=body)
+        assert r.status_code == 409, r.text          # 守门 #2：含沙箱节点即拒（非 offline）
+        assert spy.calls == 0                          # 真 LLM 绝对没被偷调
+    finally:
+        REGISTRY.pop(tp, None)
+
+
+def test_c1_pure_sandbox_node_also_distrusted_by_gate(tmp_path):
+    """守门 #2 兜底：即便沙箱节点无害（不偷调），含它的蓝图也不受信——非 offline
+    即 409（证书信任根在沙箱节点在场时失效）。"""
+    from alphaloom.nodes.registry import REGISTRY
+    spy = _SpyLLM()
+    client = _make_app(tmp_path, llm_client=spy)
+    tp = f"pure_{uuid.uuid4().hex[:8]}"
+    try:
+        reg = client.post("/api/nodes/custom",
+                          json={"source": _PURE_SANDBOX_SOURCE.format(tp=tp)})
+        assert reg.status_code == 200, reg.text
+        # 蓝图：feed → pure(SERIES) 悬空 + 正常 ema_cross 主链（pure 节点在场即触发守门）
+        bp = _ema_loom()
+        bp["nodes"].append({"id": "pure", "type": tp, "params": {}})
+        bp["edges"].append({"from": "feed.out", "to": "pure.candle"})
+        r = client.post("/api/eval/leaderboard",
+                        json={"inst": "BTC-USDT-SWAP", "bar": "1m",
+                              "blueprint": bp, "blueprint_name": "with_pure"})
+        assert r.status_code == 409, r.text
+        assert "sandbox" in r.text.lower()
+    finally:
+        REGISTRY.pop(tp, None)
+
+
+def test_c1_sandbox_node_blueprint_allowed_when_offline(tmp_path):
+    """守门只拦非 offline：含沙箱节点的蓝图在 offline 客户端下放行（零配额安全），
+    且运行期剥离仍生效（偷调节点即便放行也调不到真 llm——纵深防御）。"""
+    from alphaloom.nodes.registry import REGISTRY
+
+    class _OfflineSpy(_SpyLLM):
+        offline = True
+
+    spy = _OfflineSpy()
+    client = _make_app(tmp_path, llm_client=spy)
+    tp = f"pure2_{uuid.uuid4().hex[:8]}"
+    try:
+        client.post("/api/nodes/custom",
+                    json={"source": _PURE_SANDBOX_SOURCE.format(tp=tp)})
+        bp = _ema_loom()
+        bp["nodes"].append({"id": "pure", "type": tp, "params": {}})
+        bp["edges"].append({"from": "feed.out", "to": "pure.candle"})
+        r = client.post("/api/eval/leaderboard",
+                        json={"inst": "BTC-USDT-SWAP", "bar": "1m",
+                              "blueprint": bp, "blueprint_name": "with_pure"})
+        assert r.status_code == 200, r.text          # offline → 放行
+        assert spy.calls == 0                          # 纯节点不调 llm
+    finally:
+        REGISTRY.pop(tp, None)

@@ -572,3 +572,125 @@ def test_malformed_pin_type_does_not_break_nodes_listing():
         for v in d.outputs.values():
             assert isinstance(v, PinType)
             _ = v.value
+
+
+# ---------------------------------------------------------------------------
+# C1（Critical）：沙箱节点绕过 LLM 配额守门——沙箱 AST 不拦普通属性访问
+# ``ctx.llm``，一个声称 llm_calls_per_bar=0 的沙箱节点能在 on_bar 里偷调
+# ctx.llm.chat 刷爆真实配额。根治：沙箱节点标 sandboxed=True，运行期引擎给它剥离
+# .llm/.audit 的受限 ctx 视图（访问即 SandboxEscapeError，绝不静默调真 LLM）。
+# ---------------------------------------------------------------------------
+
+# 偷调 LLM 的恶意沙箱节点：cost 谎报 llm_calls_per_bar=0，on_bar 却 ctx.llm.chat。
+# （沙箱 AST 禁 .format，故用 dict 直接构造 messages，不用格式串。）
+LLM_THIEF_SOURCE = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="llm_thief", category="decision",
+      inputs={"candle": PinType.CANDLE}, outputs={"signal": PinType.SIGNAL},
+      cost=CostAnnotation(llm_calls_per_bar=0, deterministic=True))
+class LlmThiefNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        messages = [{"role": "user", "content": "burn quota"}]
+        ctx.llm.chat(messages)
+        return {"signal": {"side": "long", "qty": 0.0, "stop": None, "reason": "stolen"}}
+'''
+
+
+class _SpyLLM:
+    """记录被调次数的假 LLM——若守门/剥离失灵、真 chat 被调，calls 会 >0（自证）。"""
+    offline = False
+
+    def __init__(self):
+        self.calls = 0
+
+    def chat(self, messages, tools=None, temperature=0.2, **params):
+        self.calls += 1
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+
+def test_sandbox_node_is_marked_sandboxed():
+    """沙箱热注册的节点 NodeDef.sandboxed=True；内置节点为 False。"""
+    d = compile_node_source(LEGIT_SOURCE)
+    assert not isinstance(d, SandboxError)
+    assert d.sandboxed is True
+    # 内置节点不受影响
+    from alphaloom.nodes.registry import get_node_def
+    assert get_node_def("ema").sandboxed is False
+
+
+def test_sandbox_node_cannot_reach_ctx_llm_via_engine():
+    """C1 根治（引擎层）：沙箱节点在 engine.step 里拿到剥离 .llm 的受限 ctx，
+    ctx.llm 访问抛 SandboxEscapeError——间谍 LLM 的 chat 永远不被调（calls==0）。"""
+    from alphaloom.graph.model import BlueprintSpec, EdgeSpec, NodeSpec as NS, PortRef
+    from alphaloom.graph.compiler import compile_blueprint
+    from alphaloom.runtime.context import RunContext, SimClock
+    from alphaloom.runtime.engine import Engine, SandboxEscapeError
+    from alphaloom.runtime.events import BarEvent
+
+    d = compile_node_source(LLM_THIEF_SOURCE)
+    assert not isinstance(d, SandboxError) and d.sandboxed is True
+    # 最小可编译图：feed → llm_thief（SIGNAL 输出悬空即可，只测 on_bar 的 ctx）
+    bp = BlueprintSpec("thief_bp", "thief", [
+        NS("feed", "candle_feed", {"inst": "TEST", "bar": "1m"}),
+        NS("thief", "llm_thief", {}),
+    ], [EdgeSpec(PortRef("feed", "out"), PortRef("thief", "candle"), False)], {})
+    compiled = compile_blueprint(bp)
+    assert compiled.ok, [e.code for e in compiled.errors]
+    instances = {nid: create_instance(spec) for nid, spec in compiled.nodes.items()}
+    spy = _SpyLLM()
+    ctx = RunContext(clock=SimClock(), run_id="r", llm=spy)
+    engine = Engine(compiled, instances, ctx)
+    candle = {"ts": 0, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0}
+    with pytest.raises(SandboxEscapeError):
+        engine.step(BarEvent(candle, 60_000))
+    assert spy.calls == 0        # 真 LLM 绝对没被偷调——剥离生效
+
+
+def test_restricted_ctx_passes_through_legit_attrs_but_strips_llm():
+    """受限 ctx 视图：合法纯计算所需属性（clock/broker/run_id）照常委托真 ctx，
+    唯 .llm/.audit 被剥夺——不误伤合法沙箱节点的正常数据处理。"""
+    from alphaloom.runtime.context import RunContext, SimClock
+    from alphaloom.runtime.engine import _RestrictedContext, SandboxEscapeError
+
+    real = RunContext(clock=SimClock(), run_id="run-42", broker="BROKER",
+                      llm="SECRET_LLM", audit="AUDIT")
+    view = _RestrictedContext(real)
+    assert view.run_id == "run-42"
+    assert view.broker == "BROKER"
+    assert view.clock is real.clock
+    with pytest.raises(SandboxEscapeError):
+        _ = view.llm
+    with pytest.raises(SandboxEscapeError):
+        _ = view.audit
+
+
+def test_builtin_llm_node_still_gets_real_llm():
+    """回归：内置（受信）LLM 节点不受剥离影响——engine 给它真 ctx，ctx.llm 照常可用。"""
+    from alphaloom.graph.model import BlueprintSpec, EdgeSpec, NodeSpec as NS, PortRef
+    from alphaloom.graph.compiler import compile_blueprint
+    from alphaloom.runtime.context import RunContext, SimClock
+    from alphaloom.runtime.engine import Engine
+    from alphaloom.runtime.events import BarEvent
+
+    bp = BlueprintSpec("llm_bp", "llm", [
+        NS("feed", "candle_feed", {"inst": "TEST", "bar": "1m"}),
+        NS("atr", "atr", {"period": 14}),
+        NS("analyst", "llm_analyst", {"persona": "trend", "atr_mult": 2.0}),
+    ], [
+        EdgeSpec(PortRef("feed", "out"), PortRef("atr", "candle"), False),
+        EdgeSpec(PortRef("feed", "out"), PortRef("analyst", "candle"), False),
+        EdgeSpec(PortRef("atr", "value"), PortRef("analyst", "atr"), False),
+    ], {})
+    compiled = compile_blueprint(bp)
+    assert compiled.ok
+    instances = {nid: create_instance(spec) for nid, spec in compiled.nodes.items()}
+    spy = _SpyLLM()
+    ctx = RunContext(clock=SimClock(), run_id="r", llm=spy)
+    engine = Engine(compiled, instances, ctx)
+    candle = {"ts": 0, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0}
+    engine.step(BarEvent(candle, 60_000))
+    assert spy.calls == 1        # 内置受信 LLM 节点照常调真 llm（剥离只针对沙箱节点）

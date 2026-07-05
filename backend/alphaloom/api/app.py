@@ -287,22 +287,40 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             raise HTTPException(422, {"errors": [e.to_dict() for e in r.errors]})
         return r
 
+    def _has_sandbox_node(compiled) -> bool:
+        """蓝图是否含任何沙箱热注册（不受信）的节点类型。守门不信任沙箱节点的
+        成本证书自证——沙箱节点可声明 llm_calls_per_bar=0 却运行期偷调 LLM（C1）。
+        虽运行期受限 ctx 已根治偷调，此处按"可能烧配额"兜底拒绝，防未来同类信任
+        缺口（深度防御，C1 修复 #2）。"""
+        for spec in getattr(compiled, "nodes", {}).values():
+            d = REGISTRY.get(getattr(spec, "type", None))
+            if d is not None and getattr(d, "sandboxed", False):
+                return True
+        return False
+
     def _needs_llm(compiled) -> bool:
         cert = getattr(compiled, "certificate", None)
-        return bool(cert is not None and getattr(cert, "llm_calls_per_bar", 0) > 0)
+        if cert is not None and getattr(cert, "llm_calls_per_bar", 0) > 0:
+            return True
+        # 兜底：含沙箱节点即不信任其零 LLM 自证（证书信任根在沙箱节点在场时失效）。
+        return _has_sandbox_node(compiled)
 
     def _llm_quota_safe() -> bool:
         """当前 llm 客户端是否零配额安全（offline 录制回放 / 本地剧本）。"""
         return getattr(app.state.llm, "offline", False) is True
 
     def _guard_llm_blueprint(compiled):
-        """LLM 蓝图须 offline 客户端；否则 409（不烧真配额，评估拒绝跑）。"""
+        """LLM 蓝图（或含不受信沙箱节点的蓝图）须 offline 客户端；否则 409
+        （不烧真配额，评估拒绝跑）。"""
         if _needs_llm(compiled) and not _llm_quota_safe():
+            reason = ("an untrusted sandbox-registered node (its zero-LLM cost "
+                      "certificate is not trusted)" if _has_sandbox_node(compiled)
+                      else "LLM node(s)")
             raise HTTPException(
-                409, "blueprint contains LLM node(s); evaluation refuses to run it "
+                409, f"blueprint contains {reason}; evaluation refuses to run it "
                      "against live quota. Provide recorded calls and set "
                      "ALPHALOOM_OFFLINE=1 (offline replay), or inject an offline "
-                     "LLM client. Deterministic (non-LLM) blueprints run freely.")
+                     "LLM client. Deterministic built-in-only blueprints run freely.")
 
     def _eval_source():
         from alphaloom.data.sqlite_source import SQLiteMarketData
