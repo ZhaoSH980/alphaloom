@@ -139,7 +139,7 @@ def test_execute_order_delta_and_reversal():
     assert ex.on_bar(ctx, {"signal": stamped})["submitted"] is True
     broker.on_bar({"ts": 60_000, "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1})
     assert broker.position().qty == 2.0
-    rev = dict(stamped, side="short", qty=1.0)
+    rev = dict(stamped, side="short", qty=1.0, stop=105.0)   # 反手信号带正确方向的止损
     ex.on_bar(ctx, {"signal": rev})
     broker.on_bar({"ts": 120_000, "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1})
     assert broker.position().qty == -1.0          # 2.0 多 → 1.0 空，一次性下 3.0 卖单
