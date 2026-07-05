@@ -4,6 +4,7 @@ from graphlib import TopologicalSorter, CycleError
 from alphaloom.graph.model import BlueprintSpec, EdgeSpec, NodeSpec, PortRef, loads_loom
 from alphaloom.graph.errors import CompileError
 from alphaloom.graph.types import PinType
+from alphaloom.graph.cost import build_certificate
 from alphaloom.nodes.registry import REGISTRY
 
 @dataclass(frozen=True)
@@ -159,5 +160,6 @@ def compile_blueprint(bp: BlueprintSpec, *, bars_per_day: int = 1440) -> Compile
         ready = sorted(ts.get_ready())    # 跨进程/跨声明序确定（录制回放依赖）
         order.extend(ready)
         ts.done(*ready)
-    return CompileResult(True, [], order, bindings,
+    cert = build_certificate([defs[nid] for nid in order], bars_per_day)
+    return CompileResult(True, [], order, bindings, cert,
                          nodes={n.id: n for n in bp.nodes})
