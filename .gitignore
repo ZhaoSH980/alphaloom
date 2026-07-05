@@ -1,0 +1,9 @@
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.hypothesis/
+data/sample.sqlite
+runs/
+.env
+.env.*
