@@ -5,7 +5,7 @@ description = "Agent-native quant trading platform - the graph IS the agent"
 license = {text = "MIT"}
 authors = [{name = "Zhao Chenghao"}]
 requires-python = ">=3.12"
-dependencies = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
+dependencies = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "openai>=1.40"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "hypothesis>=6", "httpx>=0.27"]
