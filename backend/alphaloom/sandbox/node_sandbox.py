@@ -412,6 +412,25 @@ def compile_node_source(src: str) -> NodeDef | SandboxError:
             f"and may not be declared by sandboxed nodes (stamp provenance forgery)",
             reason="forge_risk_stamp",
         )
+
+    # 7) 接缝防线：inputs/outputs 每个值必须是真 PinType 实例（网络可达跨用户 DoS，
+    # T8 审查 carryover #9②）。@node 装饰器本身不校验 inputs/outputs 的值类型——
+    # 一个畸形节点（如 outputs={"v": [PinType.SERIES]} 传 list，或 outputs={"v":
+    # "series"} 传 str）此前能注册成功，随后让 GET /api/nodes（app.py 的
+    # ``{k: v.value for ...}``）和 /api/compile（compiler.py 的 ``t_out.value``）
+    # 对该类型上所有非 PinType 的值取 .value 时 AttributeError → 500，且 REGISTRY
+    # 是进程级全局状态，一旦注册就持久污染，对所有后续调用者（含其他用户）500。
+    # 故在此校验并回滚，与上面的伪造盖章检查同一接缝防线模式。
+    for _port_name, _pin in {**ndef.inputs, **ndef.outputs}.items():
+        if not isinstance(_pin, PinType):
+            _rollback(before)
+            return SandboxError(
+                f"node {t!r} declares port {_port_name!r} with value {_pin!r} "
+                f"which is not a PinType instance; inputs/outputs values must all "
+                f"be real PinType members (malformed pin type would crash "
+                f"GET /api/nodes and /api/compile for every subsequent caller)",
+                reason="bad_pin_type",
+            )
     return ndef
 
 

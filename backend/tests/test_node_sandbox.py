@@ -384,3 +384,86 @@ def test_threshold_node_cost_is_deterministic_zero():
                             threshold=100.0, side="short")
     assert d.cost.deterministic is True
     assert d.cost.llm_calls_per_bar == 0
+
+
+# ---------------------------------------------------------------------------
+# 接缝防线：自定义节点的 inputs/outputs 值必须是真 PinType（T8 审查 carryover #9②）
+#
+# 畸形节点（outputs 值是 list 或 str 而非 PinType 实例）此前能注册成功，随后让
+# GET /api/nodes（``{k: v.value for ...}`` 对非 PinType 取 .value）和
+# /api/compile（compiler.py ``t_out.value``）对所有后续调用者 500，
+# 进程级 REGISTRY 持久污染（网络可达跨用户 DoS，经 POST /api/nodes/custom 触发）。
+# ---------------------------------------------------------------------------
+
+BAD_PIN_TYPE_LIST_SOURCE = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="bad_pin_list", category="indicator",
+      inputs={"candle": PinType.CANDLE}, outputs={"v": [PinType.SERIES]},
+      cost=CostAnnotation(deterministic=True))
+class BadPinListNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        return {"v": 1.0}
+'''
+
+BAD_PIN_TYPE_STR_SOURCE = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="bad_pin_str", category="indicator",
+      inputs={"candle": PinType.CANDLE}, outputs={"v": "series"},
+      cost=CostAnnotation(deterministic=True))
+class BadPinStrNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        return {"v": 1.0}
+'''
+
+BAD_PIN_TYPE_IN_INPUTS_SOURCE = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="bad_pin_input", category="indicator",
+      inputs={"candle": [PinType.CANDLE]}, outputs={"v": PinType.SERIES},
+      cost=CostAnnotation(deterministic=True))
+class BadPinInputNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        return {"v": 1.0}
+'''
+
+
+@pytest.mark.parametrize("src,type_name", [
+    (BAD_PIN_TYPE_LIST_SOURCE, "bad_pin_list"),
+    (BAD_PIN_TYPE_STR_SOURCE, "bad_pin_str"),
+    (BAD_PIN_TYPE_IN_INPUTS_SOURCE, "bad_pin_input"),
+])
+def test_malformed_pin_type_rejected_and_rolled_back(src, type_name):
+    """outputs/inputs 值不是真 PinType（list 或 str）→ SandboxError bad_pin_type，
+    且绝不留在 REGISTRY 里（不然 GET /api/nodes 会被畸形节点 500 污染所有后续调用者）。"""
+    result = compile_node_source(src)
+    assert isinstance(result, SandboxError), (
+        f"expected SandboxError for malformed pin type, got {result!r}")
+    assert result.reason == "bad_pin_type"
+    assert type_name not in REGISTRY
+
+
+def test_malformed_pin_type_does_not_break_nodes_listing():
+    """红队复现：畸形节点若注册成功，GET /api/nodes 的 ``v.value`` 会对非 PinType
+    抛 AttributeError。修复后畸形节点根本不进 REGISTRY，遍历 REGISTRY 取 .value
+    不会炸。"""
+    result = compile_node_source(BAD_PIN_TYPE_LIST_SOURCE)
+    assert isinstance(result, SandboxError)
+    # 模拟 GET /api/nodes 的遍历逻辑：不应因残留畸形值而抛异常
+    for d in REGISTRY.values():
+        for v in d.inputs.values():
+            assert isinstance(v, PinType)
+            _ = v.value
+        for v in d.outputs.values():
+            assert isinstance(v, PinType)
+            _ = v.value

@@ -260,6 +260,41 @@ def test_custom_node_malicious_source_returns_422(tmp_path):
     assert detail["reason"] == "import_denied"
 
 
+def test_custom_node_bad_pin_type_returns_422_and_nodes_stays_healthy(tmp_path):
+    """T8 审查 carryover #9②：畸形节点（outputs 值是 list 而非真 PinType）此前能
+    注册成功，随后让 GET /api/nodes 对所有后续调用者 500（进程级 REGISTRY 持久
+    污染，网络可达跨用户 DoS）。修复后：POST 本身 422 reason=bad_pin_type，且
+    紧随其后的 GET /api/nodes 仍 200（未被畸形节点污染）。"""
+    tp = f"bad_pin_{uuid.uuid4().hex[:8]}"
+    src = f'''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="{tp}", category="indicator",
+      inputs={{"candle": PinType.CANDLE}}, outputs={{"v": [PinType.SERIES]}},
+      cost=CostAnnotation(deterministic=True))
+class BadPinNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        return {{"v": 1.0}}
+'''
+    client, _llm, _tr = _make_client(tmp_path)
+    try:
+        r = client.post("/api/nodes/custom", json={"source": src})
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"]["reason"] == "bad_pin_type"
+        assert tp not in REGISTRY   # 畸形节点绝不注册
+
+        # 复现点：紧随其后的 GET /api/nodes 必须仍 200（不被畸形节点污染成 500）
+        r2 = client.get("/api/nodes")
+        assert r2.status_code == 200, r2.text
+        types = {n["type"] for n in r2.json()}
+        assert tp not in types
+    finally:
+        REGISTRY.pop(tp, None)
+
+
 def test_custom_node_forge_risk_stamp_returns_422(tmp_path):
     """声明 RISK_STAMPED_SIGNAL 输出的沙箱节点 → 422 reason=forge_risk_stamp。"""
     tp = f"fake_gate_{uuid.uuid4().hex[:8]}"
