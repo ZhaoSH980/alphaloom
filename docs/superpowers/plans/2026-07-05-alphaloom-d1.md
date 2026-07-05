@@ -1263,7 +1263,7 @@ def test_feedback_edge_prev_wave():
     bp = {"id": "f", "name": "f",
           "nodes": [{"id": "s", "type": "te_src"}, {"id": "e", "type": "te_echo_prev"}],
           "edges": [{"from": "s.v", "to": "e.cur"},
-                    {"from": "e.out", "to": "e.prev", "feedback": True}]}
+                    {"from": "s.v", "to": "e.prev", "feedback": True}]}
     compiled, inst = _mk(bp)
     eng = Engine(compiled, inst, RunContext(clock=SimClock(), run_id="r2"))
     seen = []
@@ -1293,6 +1293,8 @@ def test_recorder_row_count(tmp_path):
     Engine(compiled, inst, RunContext(clock=SimClock(), run_id="r5", recorder=rec)).run(_events(4))
     assert len(rec.fetch("r5")) == 4 * 2
 ```
+
+（`test_feedback_edge_prev_wave` 反馈边源为 Task 8 实现时 sanctioned deviation：原稿写 `e.out -> e.prev` 自环——TeEchoPrev 一旦 prev 非 None 就回显 prev，自环在锁定语义（反馈取上一波）下永远停在首值 [1,1,1]，任何引擎语义都无法产出原稿期望的 [1,1,2]。改为 `s.v -> e.prev`：prev(t) = 上一 bar 的 s.v，期望 [1.0, 1.0, 2.0] 成立，且能区分"上一波交付"（[1,1,2]）与"本波交付/从不交付"（均为 [1,2,3]），测试判别力更强。引擎代码块与锁定语义未动。）
 
 - [ ] **Step 2: 运行确认失败**
 
