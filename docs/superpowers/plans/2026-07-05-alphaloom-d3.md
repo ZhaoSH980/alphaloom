@@ -283,4 +283,6 @@ nodes/llm_nodes.py：LLMAnalystNode（type=llm_analyst, category=decision, input
 2. 录制库 llm_calls.sqlite 入库供离线演示——**Task 11 硬前置：.gitignore 现有 `data/*.sqlite` 会挡住它，必须加 `!data/llm_calls.sqlite` 例外否则离线回放全 miss**（T1 审查实测 git check-ignore 确认被挡）；注意体积（种子控制在少量演示运行）；真实 key 演示前用户自填 .env。
 3. 沙箱 AST 白名单是最小可用版；D4 若开放用户自定义节点市场需加资源限额（CPU/内存/超时）。
 4. 强制引用（citations 非空才允许交易）在 D3 是软约定+测试；D4 可升级为编译期类型（RAG 盖章类型，类比 RiskStampedSignal）。
+6. citations 合流：signal 自带 + pin 若携同一条 citation 会输出重复（真实蓝图不触发——LLM 节点自带 citations 恒空、pin 唯一来源；前端引用徽章可选 `dict.fromkeys` 去重，D4）。
+7. CJK 2-gram 改变了 BM25 全局统计量使英文绝对分值变化（排序不变、当前无 score 阈值依赖）——D4 若加 score 门限逻辑需重标定。
 5. `_extract_json` 字符级平衡扫描不识别 JSON 字符串值内的孤立花括号（fail-safe 回退 hold，被 system prompt "No prose outside JSON" 覆盖）——T2/T3 复用它，若想硬化改 `json.JSONDecoder().raw_decode()` 从 `{` 逐位尝试（D4）。
