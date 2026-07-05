@@ -2322,3 +2322,4 @@ git tag d2-complete
 5. run 线程无并发上限——D3 前在 RunService.start 加简单信号量（如 4）防手滑压爆。
 6. Terminal K 线图全量 5000 根 + fills 全量 setMarkers，万根级会卡——D4 打磨时按可视窗口懒载。
 7. test_runs_store 的 join(timeout=30) 在慢机器上可能边缘——若 CI 出现 flake，提高 timeout 而非改语义。
+8. **D2-T4 审查移交**：①`_sink_for` 用全局单 `app.state.loop`——生产（uvicorn 单 loop）无害且已实证，但 **TestClient 每连接起独立 loop，故禁止加"并发多客户端 WS"测试**（会确定性挂死 CI）；若 D3 需要该测试，先让 `_sink_for` 按队列记 loop（`q._loop.call_soon_threadsafe`）。②event_log 20k 上限是尾丢弃——超长 run（>~14 天 1m 线）的晚连接客户端会重放不全含丢 `done`；D4 长回测前改环形缓冲或对晚连接补发终态（演示数据 BTC/ETH 各 4000 bar 远未触及）。
