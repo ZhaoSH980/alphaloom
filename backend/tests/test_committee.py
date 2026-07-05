@@ -130,3 +130,37 @@ def test_committee_without_llm_client_raises():
     node = _committee()
     with pytest.raises(RuntimeError, match="no LLM client bound"):
         node.on_bar(ctx, {"candle": _CANDLE, "atr": 1.0})
+
+
+# --------------------------------------------------------------------------- #
+# skip_risk_officer 消融参数（D4-T4）：跳过 LLM 风控官"软护栏"，两次调用两条 trace
+# --------------------------------------------------------------------------- #
+def test_committee_skip_risk_officer_two_calls_and_two_role_trace():
+    """消融臂：策略师 → 主席，两次 LLM 调用；trace 两项且无 veto 键；
+    主席 user prompt 只含策略师 JSON（无 risk_officer 键）。"""
+    llm = _SequencedLLM([json.dumps(_STRAT), json.dumps(_CHAIR)])
+    ctx = _ctx(llm)
+    node = _committee({"atr_mult": 2.0, "skip_risk_officer": True})
+    out = node.on_bar(ctx, {"candle": _CANDLE, "atr": 1.5})["signal"]
+
+    assert len(llm.calls) == 2
+    chair_user = "".join(
+        m["content"] for m in llm.calls[1]["messages"] if m["role"] == "user")
+    assert "breakout above range" in chair_user     # 策略师 JSON 交接不变
+    assert "risk_officer" not in chair_user         # 风控官整个角色不存在
+
+    assert out["side"] == "long"
+    trace = out["committee_trace"]
+    assert len(trace) == 2                          # 策略师 + 主席，无风控官
+    assert all("veto" not in t for t in trace)
+
+    tools = [d["tool"] for d in ctx.audit.as_dicts()]
+    assert tools == ["committee:strategist", "committee:chair"]
+
+
+def test_committee_skip_risk_officer_registered_param_defaults_off():
+    d = get_node_def("committee")
+    assert d.params.get("skip_risk_officer") is bool
+    # 默认不跳过：不传参数时三角色三调用（上方既有测试已锁），此处锁 setup 默认值
+    node = _committee({"atr_mult": 2.0})
+    assert node.skip_risk_officer is False

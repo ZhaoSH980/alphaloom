@@ -38,6 +38,14 @@
 
 **委员会消融**（spec §7，D3 Carryover #1）：`eval/ablation.py::committee_ablation(base_blueprint, source, llm) -> AblationReport`。三臂：完整委员会 / 去风控官 / 去 RAG（require_citations）。同数据比较验证窗表现 + 风控官拦截的危险提案计数。**规模锁定**：3 臂 × 同一窗口，全程录制供离线回放。预期卖点：无风控官臂样本内更好看、验证窗更差——护栏价值量化。若结果相反如实发布。
 
+> **D4-T4 实施注记（sanctioned deviations，控制器 T4 任务书已核准）**：
+> 1. **签名**定为 `committee_ablation(base_blueprint, source, *, inst, bar, start_ms=None, end_ms=None, llm=None, arms=None, initial_cash=10_000.0, fee_rate=0.0005) -> AblationReport`（非 `(base_blueprint, source, llm)`）——窗口/标的参数化对齐 run_backtest；`arms` 允许子集对照（缺 full/no_risk_officer 任一臂时 guardrail_value=None，不硬造对照）。
+> 2. **三臂由图变换生成**（消融=可编程的图手术，不是三份手写蓝图）：no_risk_officer 臂 = 参数手术——committee 节点新增 `skip_risk_officer: bool` param（committee.py 小改：跳过风控官角色调用，主席只读策略师 JSON，trace 两项、无 veto 可能；cost 注解维持 3 calls/bar 的**静态上界**不随参数收窄——证书是编译期注解，只许高估不许低估）；no_rag 臂 = `graph_bypass(require_citations)`（SIGNAL→SIGNAL 透传门旁路，上游直连原下游）+ 移除 knowledge_retrieve 及其悬空边。
+> 3. **veto/四象限计数经 `run_backtest(breakpoints="all", on_pause=collector)` 旁路收集**（零改 runner）：从下游节点输入 signal 里的 committee_trace 数 veto bar（按 bar 去重），从 reflector verdict 载荷（trade_key+verdict）数四象限（按 trade_key 去重）。依赖 committee 输出至少接一个下游节点——真实蓝图恒成立。
+> 4. **硬护栏不可消融测试锁定**：`graph_bypass(risk_gate)` 产物编译必 TYPE_MISMATCH（headline 蓝图与测试蓝图各锁一次，fix_hint 指回 RiskGate）——消融能拆的只有 LLM 风控官"软护栏"，类型系统"硬护栏"编译器不放行，这本身就是卖点。
+> 5. **guardrail_value 纯计算、正负都如实**：full − no_risk_officer 的 net_pnl/return_pct/max_drawdown 差 + `guardrail_helped` 布尔。测试含正剧本（风控官拦下暴跌前危险提案：full 0.0 vs 消融臂 −510.14，delta=+510.14）与**反向剧本**（偏执风控官净误杀上涨行情的盈利交易：delta=−4753.94、guardrail_helped=false 如实展示）——代码无任何硬编码结论，T8 真实录制若结果相反照实呈现。
+> 6. 录制/离线回放验证属 T8（真实讯飞录制），本任务全部测试用确定性 fake transport（纯本地函数，零网络零配额），未触碰 data/llm_calls.sqlite。
+
 **进化实验室**（spec §6，"Agent 即研究员"终极形态）：`evolve/lab.py::evolve(seed_blueprint, source, llm, *, population=4, generations=3) -> Genealogy`。Agent 读回测报告→提出蓝图**变异**（参数/节点/连线，图 diff）→变异版过编译（**风控类型系统守门——变异不能绕风控**）→回测评估适应度→优者存活进下代→谱系树。本质遗传算法，变异算子是 LLM。**规模硬锁定**：种群≤4、代数≤3、适应度用样本内窗口+终选做验证窗打分（防过拟合，泄漏测试保障）。**降级保险丝**：只做参数变异不动图结构。全程录制。
 
 **Carryover 债务清偿批次**（D2/D3 各 Carryover，D4 前必修的）：

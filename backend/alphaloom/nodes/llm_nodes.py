@@ -168,6 +168,9 @@ _DEFAULT_PERSONAS = {
         "strategist_prompt": str,
         "risk_prompt": str,
         "chair_prompt": str,
+        # 消融开关（D4-T4）：跳过 LLM 风控官"软护栏"（策略师 → 主席两角色）。
+        # RiskGate"硬护栏"由类型系统强制、无法被消融（见 eval/ablation.py）。
+        "skip_risk_officer": bool,
     },
     cost=CostAnnotation(
         llm_calls_per_bar=3,   # 三角色各一次（策略师/风控官/主席）
@@ -183,10 +186,15 @@ class CommitteeNode:
     风控官 veto → 主席终案强制 side=hold。任一角色坏 JSON → 整体回退 hold
     （rationale 指明哪个角色 parse 失败）。输出 signal 附加
     committee_trace:[strategist_json, risk_json, chair_json] 供前端展示。
+
+    ``skip_risk_officer=True``（消融臂，D4-T4）：跳过风控官——每 bar 2 次调用、
+    主席只读策略师 JSON、trace 两项、无 veto 可能。cost 注解维持 3 次/bar 的
+    **静态上界**（成本证书是编译期注解，不随参数收窄；只许高估不许低估）。
     """
 
     def setup(self, params):
         self.atr_mult = float(params.get("atr_mult", 2.0))
+        self.skip_risk_officer = bool(params.get("skip_risk_officer", False))
         self.strategist_persona = str(
             params.get("strategist_persona", _DEFAULT_PERSONAS["strategist"]))
         self.risk_persona = str(
@@ -238,23 +246,32 @@ class CommitteeNode:
             return self._hold("strategist parse failed", [])
 
         # --- 角色 2：风控官（读策略师 JSON → veto/收紧） ---
-        risk_sys = self.risk_prompt.format(persona=self.risk_persona)
-        risk_user = json.dumps(
-            {"market": json.loads(market), "strategist": strat_json}, sort_keys=True)
-        risk_json = self._ask(ctx, risk_sys, risk_user, role="risk", ts=ts)
-        if not isinstance(risk_json, dict) or "veto" not in risk_json:
-            return self._hold("risk officer parse failed", [strat_json])
-        veto = bool(risk_json.get("veto"))
+        # 消融开关（skip_risk_officer，D4-T4）：跳过该角色——LLM 风控官是可被消融
+        # 实验拆除做对照的"软护栏"；RiskGate"硬护栏"由类型系统强制，消融不掉
+        # （旁路它的图编译必 TYPE_MISMATCH，见 eval/ablation.py + 测试锁定）。
+        risk_json = None
+        veto = False
+        if not self.skip_risk_officer:
+            risk_sys = self.risk_prompt.format(persona=self.risk_persona)
+            risk_user = json.dumps(
+                {"market": json.loads(market), "strategist": strat_json}, sort_keys=True)
+            risk_json = self._ask(ctx, risk_sys, risk_user, role="risk", ts=ts)
+            if not isinstance(risk_json, dict) or "veto" not in risk_json:
+                return self._hold("risk officer parse failed", [strat_json])
+            veto = bool(risk_json.get("veto"))
 
-        # --- 角色 3：主席（读策略师+风控官两份 JSON → 合成终案） ---
+        # --- 角色 3：主席（读策略师[+风控官]JSON → 合成终案） ---
         chair_sys = self.chair_prompt.format(persona=self.chair_persona)
-        chair_user = json.dumps(
-            {"strategist": strat_json, "risk_officer": risk_json}, sort_keys=True)
+        chair_payload = {"strategist": strat_json}
+        if risk_json is not None:
+            chair_payload["risk_officer"] = risk_json
+        chair_user = json.dumps(chair_payload, sort_keys=True)
         chair_json = self._ask(ctx, chair_sys, chair_user, role="chair", ts=ts)
+        pre_trace = [strat_json] + ([risk_json] if risk_json is not None else [])
         if not isinstance(chair_json, dict) or chair_json.get("side") not in _VALID_SIDES:
-            return self._hold("chair parse failed", [strat_json, risk_json])
+            return self._hold("chair parse failed", pre_trace)
 
-        trace = [strat_json, risk_json, chair_json]
+        trace = pre_trace + [chair_json]
 
         # 风控官 veto → 终案强制 hold（尊重否决，不信主席嘴）
         if veto:
