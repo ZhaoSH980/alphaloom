@@ -5,3 +5,4 @@ import alphaloom.nodes.indicators  # noqa: F401,E402
 import alphaloom.nodes.gates       # noqa: F401,E402
 import alphaloom.nodes.sizing      # noqa: F401,E402
 import alphaloom.nodes.execution   # noqa: F401,E402
+import alphaloom.nodes.llm_nodes    # noqa: F401,E402

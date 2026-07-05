@@ -14,6 +14,7 @@ from alphaloom.runtime.context import RunContext, SimClock
 from alphaloom.runtime.engine import Engine
 from alphaloom.runtime.events import BarEvent
 from alphaloom.runtime.recorder import Recorder
+from alphaloom.sandbox.audit import AuditLog
 
 class CompileFailed(Exception):
     def __init__(self, errors):
@@ -35,7 +36,7 @@ def run_backtest(bp: BlueprintSpec, source: DataSource, *, inst: str, bar: str,
                  start_ms: int | None = None, end_ms: int | None = None,
                  initial_cash: float = 10_000.0, fee_rate: float = 0.0005,
                  record_dir=None, run_id: str | None = None, breakpoints=None,
-                 on_pause=None, on_bar=None) -> BacktestReport:
+                 on_pause=None, on_bar=None, llm=None) -> BacktestReport:
     """时序契约：每根 bar 先 broker.on_bar（撮合上一根挂单/止损）再 engine.step（本根决策）
     —— 次 bar 开盘成交语义的另一半（见 PaperBroker.on_bar）。
 
@@ -56,6 +57,8 @@ def run_backtest(bp: BlueprintSpec, source: DataSource, *, inst: str, bar: str,
         rec_path = str(Path(record_dir) / f"run_{run_id}.sqlite")
         recorder = Recorder(rec_path)
     ctx = RunContext(clock=SimClock(), run_id=run_id, broker=broker, recorder=recorder)
+    ctx.llm = llm          # 默认 None → D1/D2 路径完全不变（LLM 节点缺席时无副作用）
+    ctx.audit = AuditLog()
     instances = {nid: create_instance(spec) for nid, spec in compiled.nodes.items()}
     engine = Engine(compiled, instances, ctx,
                     breakpoints=set(compiled.order) if breakpoints == "all" else set(),

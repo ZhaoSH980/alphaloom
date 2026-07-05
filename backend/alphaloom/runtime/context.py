@@ -35,3 +35,5 @@ class RunContext:
     recorder: Any = None
     current_event: Any = None
     halted: bool = False
+    llm: Any = None      # RecordingLLMClient | None：LLM 节点在 None 时抛清晰错误
+    audit: Any = None    # AuditLog：每次 LLM/检索调用留痕（provenance）
