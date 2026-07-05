@@ -68,7 +68,10 @@ export default function Studio() {
       }).catch(() => {});
     }, 500);
     return () => clearTimeout(h);
-  }, [structuralKey, currentLoom, setNodes]);
+    // 只以 structuralKey 为闸门；currentLoom()/nodes 经闭包取最新值。
+    // 切勿把 currentLoom 加回依赖——它身份每次 setNodes(blocked/active) 都变，会造成 500ms 无限编译。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [structuralKey, setNodes]);
 
   const load = async (id: string) => {
     if (nodes.length && !confirm("覆盖当前画布?")) return;
