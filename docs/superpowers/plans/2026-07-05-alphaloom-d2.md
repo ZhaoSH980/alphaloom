@@ -2352,7 +2352,7 @@ def test_websocket_library_available():
   );
 ```
 
-编译 effect 的依赖数组从 `[nodes.length, edges, currentLoom, setNodes]` 改为 `[structuralKey, currentLoom, setNodes]`——**注意 effect 体内仍调 currentLoom()，但 currentLoom 的身份变化不再单独触发（structuralKey 才是闸门）**；因 structuralKey 只在真实结构变时才变，blocked/active 的 setNodes 不改结构 → 不重编译。验证：`npm run build` + 走查确认编译只在连线/改参/拖动时触发一次，静止时零编译。
+编译 effect 的依赖数组从 `[nodes.length, edges, currentLoom, setNodes]` 改为 **`[structuralKey, setNodes]`**（控制器复走查修正：必须**移除 currentLoom**——它身份每次 setNodes 都 churn，React 只要任一依赖变就重跑，光加 structuralKey 挡不住；effect 体内 `currentLoom()` 走闭包仍拿最新图，加 eslint-disable exhaustive-deps）——**注意 effect 体内仍调 currentLoom()，但 currentLoom 的身份变化不再单独触发（structuralKey 才是闸门）**；因 structuralKey 只在真实结构变时才变，blocked/active 的 setNodes 不改结构 → 不重编译。验证：`npm run build` + 走查确认编译只在连线/改参/拖动时触发一次，静止时零编译。
 
 **验收：** 后端全量 `pytest -q` → 92 passed（91 + ws_lib 1）；前端 build 绿 + vitest 2 passed；控制器复走查确认（静止零编译 + WS 实时流）。
 
