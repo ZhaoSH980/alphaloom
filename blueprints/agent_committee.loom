@@ -1,0 +1,44 @@
+{
+  "id": "agent_committee_v1",
+  "name": "Agent Committee (LLM decision + RAG + reflection)",
+  "nodes": [
+    {"id": "feed", "type": "candle_feed", "params": {"inst": "BTC-USDT-SWAP", "bar": "1m"}},
+    {"id": "ema", "type": "ema", "params": {"period": 20}},
+    {"id": "atr", "type": "atr", "params": {"period": 14}},
+    {"id": "kb", "type": "knowledge_retrieve", "params": {"query": "trend breakout risk", "top_k": 2}},
+    {"id": "committee", "type": "committee", "params": {"atr_mult": 2.0}},
+    {"id": "cite_gate", "type": "require_citations", "params": {}},
+    {"id": "xp", "type": "experience_retrieve", "params": {"top_k": 3}},
+    {"id": "reflector", "type": "reflector", "params": {}},
+    {"id": "xp_write", "type": "experience_write", "params": {}},
+    {"id": "sizer", "type": "position_sizer", "params": {"risk_pct": 0.02}},
+    {"id": "risk", "type": "risk_gate", "params": {"max_qty": 100.0, "require_stop": true}},
+    {"id": "exec", "type": "execute_order", "params": {}},
+    {"id": "kill", "type": "kill_switch", "params": {"max_drawdown_pct": 0.25}}
+  ],
+  "edges": [
+    {"from": "feed.out", "to": "ema.candle"},
+    {"from": "feed.out", "to": "atr.candle"},
+    {"from": "feed.out", "to": "kb.candle"},
+    {"from": "feed.out", "to": "committee.candle"},
+    {"from": "atr.value", "to": "committee.atr"},
+    {"from": "committee.signal", "to": "cite_gate.signal"},
+    {"from": "kb.citations", "to": "cite_gate.citations"},
+    {"from": "feed.out", "to": "xp.candle"},
+    {"from": "ema.value", "to": "xp.ema"},
+    {"from": "atr.value", "to": "xp.atr"},
+    {"from": "cite_gate.signal", "to": "reflector.signal"},
+    {"from": "ema.value", "to": "reflector.ema"},
+    {"from": "atr.value", "to": "reflector.atr"},
+    {"from": "reflector.verdict", "to": "xp_write.verdict"},
+    {"from": "cite_gate.signal", "to": "sizer.signal"},
+    {"from": "feed.out", "to": "sizer.candle"},
+    {"from": "sizer.sized", "to": "risk.signal"},
+    {"from": "risk.stamped", "to": "exec.signal"},
+    {"from": "feed.out", "to": "kill.candle"}
+  ],
+  "meta": {
+    "preset": true,
+    "description_zh": "委员会 LLM 决策 + 知识库强制引用 + 经验检索 + 反思闭环写库（招牌演示蓝图）"
+  }
+}

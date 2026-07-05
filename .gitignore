@@ -5,6 +5,8 @@ __pycache__/
 .pytest_cache/
 .hypothesis/
 data/*.sqlite
+!data/llm_calls.sqlite
+backend/data/
 runs/
 blueprints/user/
 .env
