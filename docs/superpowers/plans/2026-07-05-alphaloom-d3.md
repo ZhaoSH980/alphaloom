@@ -31,6 +31,7 @@
 | Committee | decision | 扇出 N 角色（策略师/风控官/主席）→ 结构化 JSON 交接 → 表决；cost = 角色数 |
 | PADecisionTree | decision | 确定性数值门控（不信 LLM 嘴），读 二元决策树规则；cost 全 0 deterministic |
 | KnowledgeRetrieve | rag | BM25 检索自撰知识库，产 citations；cost 0 |
+| RequireCitations | rag | 强制引用门：long/short 但 citations 空 → 降级 hold（T4 实现时 sanctioned 新增——软约定的可组合落地形态，D4 升级编译期盖章类型）；cost 0 |
 | ExperienceRetrieve | rag | 按市场状态桶检索经验；cost 0 |
 | ExperienceWrite | reflection | 平仓后写经验（由 Reflector 驱动）；cost 0 |
 | Reflector | reflection | 过程/结局分离打分（reasonable_but_wrong 分类学，port Hindsight）；cost 可选 LLM |
