@@ -2303,7 +2303,7 @@ backend\.venv\Scripts\python -m uvicorn alphaloom.serve:app --port 8000 --app-di
    - 撤销恢复 → 在 risk 节点设断点 → Run → 节点流光推进 → Inspector 弹出（inputs 含 signal）→ 单步一次 → 继续（清断点后 resume 到完成）→ "→ Terminal" 链接
    - Terminal：run 徽章 completed、六卡片无 "Infinity"、K 线含成交箭头、权益曲线、成交表含 eod_close
    - 语言切换 zh/en 即时生效；`#/terminal?run=<id>` 直达
-5. 截图存 `docs/screenshots/d2-studio.png`、`d2-terminal.png`（walkthrough 产物，入库）
+5. 截图 `docs/screenshots/d2-{studio,terminal}.png` **延至 D4**（与 README/banner 一批做；D2 控制器 live 走查视觉证据已确认三页正常渲染，仅文件产物延后，避免为两张图装 300MB 浏览器工具链）
 
 - [ ] **Step 4: Commit + tag**
 
