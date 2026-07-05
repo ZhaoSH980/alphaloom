@@ -2347,6 +2347,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 import alphaloom.nodes  # noqa: F401  触发注册
+from alphaloom.brokers.base import Order
 from alphaloom.brokers.paper import PaperBroker
 from alphaloom.data.source import DataSource, bar_to_ms
 from alphaloom.graph.compiler import compile_blueprint
@@ -2392,10 +2393,21 @@ def run_backtest(bp: BlueprintSpec, source: DataSource, *, inst: str, bar: str,
     engine = Engine(compiled, instances, ctx)
     bar_ms = bar_to_ms(bar)
     bars = 0
+    last_candle = None
     for candle in source.iter_candles(inst, bar, start_ms, end_ms):
         broker.on_bar(candle)              # 先撮合上一根的挂单/止损并 mark
         engine.step(BarEvent(candle, bar_ms))
+        last_candle = candle
         bars += 1
+    # 收盘强平（回测惯例）：数据耗尽后残仓以最后收盘价结算成一笔完整回合，
+    # 否则持仓到期末的策略 num_trades/win_rate 全部失真（Task 12 实测发现，sanctioned）
+    if last_candle is not None and abs(broker.position().qty) > 1e-12 and not broker.halted:
+        px = float(last_candle["close"])
+        qty = broker.position().qty
+        broker.submit(Order(side="sell" if qty > 0 else "buy", qty=abs(qty), tag="eod_close"))
+        broker.on_bar({"ts": int(last_candle["ts"]) + bar_ms, "open": px, "high": px,
+                       "low": px, "close": px, "volume": 0.0})
+        del broker.equity_curve[bars:]     # 结算 bar 不入权益曲线（长度=数据根数）
     if recorder:
         recorder.close()
     return BacktestReport(
