@@ -4,13 +4,113 @@ import CandleChart, { type Candle, type Fill } from "../components/CandleChart";
 import EquityChart from "../components/EquityChart";
 import SummaryCards from "../components/SummaryCards";
 import TradesTable from "../components/TradesTable";
-import { getCandles, getRun, listRuns } from "../lib/api";
+import { getCandles, getRun, getTrace, listRuns } from "../lib/api";
+import { parseInsights, VERDICT_META, type RunInsights, type TraceRow } from "../lib/insights";
 import { useLang } from "../lib/i18n";
 
 const BADGE: Record<string, string> = {
   completed: "bg-loom-green/20 text-loom-green", failed: "bg-loom-red/20 text-loom-red",
   halted: "bg-loom-amber/20 text-loom-amber", running: "bg-loom-blue/20 text-loom-blue",
 };
+
+// —— Agent 富信息面板：委员会轨迹 + RAG 引用 + 反思四象限 + 记忆开关 ——
+// 全部从 run trace 读（getTrace(runId) 一次拉全节点），无相关节点则优雅显示"无"。
+function AgentInsights({ runId }: { runId: string }) {
+  const { t } = useLang();
+  const [data, setData] = useState<RunInsights | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setData(null); setLoading(true);
+    getTrace(runId, undefined, undefined, 2000)
+      .then((rows) => { if (alive) setData(parseInsights(rows as TraceRow[])); })
+      .catch(() => { if (alive) setData(null); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [runId]);
+
+  if (loading)
+    return <div className="panel p-3 text-xs text-slate-500">{t("loadingInsights")}</div>;
+  if (!data || !data.hasAny)
+    return <div className="panel p-3 text-xs text-slate-500">{t("noAgentData")}</div>;
+
+  return (
+    <div className="panel p-3 space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="hud-label text-loom-violet">{t("insights")}</div>
+        {/* 记忆使用指示 */}
+        <span className={`px-1.5 py-0.5 rounded text-[10px] ${data.memoryUsed
+          ? "bg-loom-green/20 text-loom-green" : "bg-edge/60 text-slate-500"}`}>
+          {t("memory")}: {data.memoryUsed ? t("memoryOn") : t("memoryOff")}
+        </span>
+      </div>
+
+      {/* RAG 引用徽章 */}
+      {data.citations.length > 0 && (
+        <div className="space-y-1">
+          <div className="hud-label text-[10px]">{t("citations")} ({data.citations.length})</div>
+          <div className="flex flex-wrap gap-1">
+            {data.citations.map((c, i) => (
+              <span key={i}
+                    className="px-1.5 py-0.5 rounded bg-loom-violet/20 text-loom-violet text-[10px] font-mono">
+                {c}
+              </span>))}
+          </div>
+        </div>)}
+
+      {/* 反思四象限 */}
+      {data.verdicts.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="hud-label text-[10px]">{t("verdicts")} ({data.verdicts.length})</div>
+          <div className="space-y-1">
+            {data.verdicts.map((v, i) => {
+              const meta = VERDICT_META[v.verdict];
+              const cls = meta?.cls ?? "bg-edge/60 text-slate-400";
+              const label = meta ? t(meta.labelKey) : v.verdict;
+              return (
+                <div key={i}
+                     className={`rounded px-2 py-1 text-[10px] ${meta?.signature ? "ring-1 ring-loom-amber/60" : ""}`}
+                     style={{ background: "rgba(30,42,68,0.35)" }}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-1.5 py-0.5 rounded ${cls}`}>{label}</span>
+                    <span className="text-slate-500">{t("regimeBucket")} </span>
+                    <span className="font-mono text-slate-300">{v.bucket}</span>
+                    <span className="text-slate-500 ml-1">{t("pnl")} </span>
+                    <span className={`font-mono ${v.pnl >= 0 ? "text-loom-green" : "text-loom-red"}`}>
+                      {v.pnl.toFixed(2)}
+                    </span>
+                  </div>
+                  {v.lesson && <div className="text-slate-400 mt-0.5">{v.lesson}</div>}
+                </div>);
+            })}
+          </div>
+        </div>)}
+
+      {/* 委员会三角色轨迹 */}
+      {data.committees.map((c) => (
+        <div key={c.nodeId} className="space-y-1">
+          <div className="hud-label text-[10px]">
+            {t("committee")} · {c.nodeId}
+            {c.side && <span className="ml-2 font-mono text-loom-amber">{c.side}</span>}
+            {typeof c.confidence === "number" && (
+              <span className="ml-2 text-slate-500">{t("confidence")} </span>)}
+            {typeof c.confidence === "number" && (
+              <span className="font-mono text-loom-green">{c.confidence.toFixed(2)}</span>)}
+          </div>
+          {c.rationale && <div className="text-[10px] text-slate-400">{c.rationale}</div>}
+          <div className="space-y-1">
+            {c.trace.map((role, i) => (
+              <pre key={i}
+                   className="text-[9px] font-mono text-slate-400 whitespace-pre-wrap
+                              border-l-2 border-loom-amber/50 pl-1.5 max-h-32 overflow-auto">
+                {role}
+              </pre>))}
+          </div>
+        </div>))}
+    </div>
+  );
+}
 
 export default function Terminal() {
   const { t } = useLang();
@@ -58,6 +158,7 @@ export default function Terminal() {
       {run?.report && (
         <>
           <SummaryCards summary={run.report.summary ?? {}} />
+          {sel && <AgentInsights runId={sel} />}
           <div className="panel p-2"><div className="hud-label mb-1">market · fills</div>
             <CandleChart candles={candles} fills={fills} /></div>
           <div className="panel p-2"><div className="hud-label mb-1">{t("equity")}</div>

@@ -30,6 +30,9 @@ export default function Studio() {
     status?: string; paused?: { node_id: string; ts: number; inputs: Record<string, unknown> } | null }>({});
   const sock = useRef<ReturnType<typeof openRunSocket> | null>(null);
   const glowTimer = useRef<number>();
+  // Run 模式：backtest（默认）| replay（加速回放，走真实 LLM/录制）。
+  // 纯 run-time 参数——不进 structuralKey（切模式不触发重编译，防 D2 编译循环）。
+  const [mode, setMode] = useState<"backtest" | "replay">("backtest");
   // Copilot：预览态 + 选中节点 + 最近报告（optimize 读它）。
   const [preview, setPreview] = useState<Preview | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -158,8 +161,11 @@ export default function Studio() {
 
   const run = useCallback(async (loom?: Loom) => {
     sock.current?.close();               // 关旧连接，防重复 Run 泄漏 WS（T6 审查 Important）
+    // replay 加速：playback_ms 更小（4 vs 15），mode 透传后端（RunIn.mode）。
+    const replay = mode === "replay";
     const { run_id } = await startRun({ blueprint: loom ?? currentLoom(), inst: "BTC-USDT-SWAP",
-      bar: "1m", playback_ms: 15, ws_wait_ms: 300, breakpoints: [...bps] });
+      bar: "1m", playback_ms: replay ? 4 : 15, ws_wait_ms: 300, breakpoints: [...bps],
+      mode });
     setRunState({ id: run_id, status: "running" });
     setReport(null);
     sock.current = openRunSocket(run_id, (ev) => {
@@ -183,7 +189,7 @@ export default function Studio() {
         setRunState((s) => ({ ...s, status: ev.status }));
       }
     });
-  }, [currentLoom, bps, setNodes]);
+  }, [currentLoom, bps, setNodes, mode]);
 
   // —— Copilot 应用：把预览 loom 一次性落地画布（setNodes/setEdges 各一次，
   // structuralKey 变一次 → 编译触发一次，非循环）。base 同步为新 loom 保证 roundtrip 一致。 ——
@@ -270,8 +276,16 @@ export default function Studio() {
                 <a className="pointer-events-auto underline ml-2"
                    href={`#/terminal?run=${runState.id}`}>→ {t("terminal")}</a>)}
             </span>)}
+          <div className="pointer-events-auto ml-auto flex items-center rounded border border-edge overflow-hidden text-xs">
+            {(["backtest", "replay"] as const).map((m) => (
+              <button key={m} onClick={() => setMode(m)}
+                      className={`px-2 py-1 ${mode === m
+                        ? "bg-loom-violet/20 text-loom-violet" : "text-slate-500 hover:text-slate-300"}`}>
+                {m === "backtest" ? t("modeBacktest") : `⏩ ${t("modeReplay")}`}
+              </button>))}
+          </div>
           <button onClick={() => run()} disabled={!!errors.length || !nodes.length || !!preview}
-                  className="pointer-events-auto ml-auto px-3 py-1 text-xs rounded bg-loom-gold/20 text-loom-gold disabled:opacity-30">
+                  className="pointer-events-auto px-3 py-1 text-xs rounded bg-loom-gold/20 text-loom-gold disabled:opacity-30">
             ▶ {t("run")}
           </button>
         </div>
