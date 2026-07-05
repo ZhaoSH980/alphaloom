@@ -185,6 +185,28 @@ def _check_import(node_obj: ast.AST, module_names: list[str]) -> None:
 class _Validator(ast.NodeVisitor):
     """逐 AST 节点白名单校验。命中违规抛 _SandboxViolation。"""
 
+    def __init__(self) -> None:
+        # name -> int 常量绑定（简单 `n = 500000` 形式），供变量绑定的 range 上界
+        # 检查用（字面量已拦、变量勿绕）。保守：只跟踪整数字面量赋值；一旦某名字
+        # 被重新赋成非常量则从表中移除（不敢假设其值），此时该名字作 range 上界会
+        # 被当"未知上界"保守拒（见 _check_range）。
+        self._const_ints: dict[str, int] = {}
+
+    def _record_const_binding(self, target, value) -> None:
+        if not isinstance(target, ast.Name):
+            return
+        if isinstance(value, ast.Constant) and isinstance(value.value, int) \
+                and not isinstance(value.value, bool):
+            self._const_ints[target.id] = value.value
+        else:
+            # 名字被赋成非整数常量 → 其值未知，从常量表移除（后续作 range 上界保守拒）
+            self._const_ints.pop(target.id, None)
+
+    def visit_Assign(self, node_obj: ast.Assign) -> None:
+        for tgt in node_obj.targets:
+            self._record_const_binding(tgt, node_obj.value)
+        self.generic_visit(node_obj)
+
     def generic_visit(self, node_obj: ast.AST) -> None:
         t = type(node_obj)
         # 1) 显式拒绝集（含专门理由）
@@ -293,11 +315,23 @@ class _Validator(ast.NodeVisitor):
                     "range() bound must be a small integer literal in sandbox",
                     "loop_bound",
                 )
+            elif isinstance(arg, ast.Name):
+                # 变量绑定上界（`n = 500000; range(n)`）——查常量表，绕过字面量检查
+                # 的大界一样拦。名字若被赋成已知整数常量则套 MAX_RANGE 上限；未知名
+                # 字（如 range(len(x)) 的 len 结果不会走这里；range(param)）保守放行
+                # ——运行时受限 builtins 无逃逸面。
+                bound = self._const_ints.get(arg.id)
+                if bound is not None and bound > MAX_RANGE:
+                    _reject(
+                        call,
+                        f"range bound {arg.id}={bound} exceeds sandbox limit {MAX_RANGE}",
+                        "loop_bound",
+                    )
             elif isinstance(arg, ast.Constant):
                 pass
             else:
-                # 变量上界（如 range(len(x))）——运行时无 __builtins__ 逃逸，允许但
-                # 依赖运行环境；保守放行（纯计算常见 range(len(...))）。
+                # 其余表达式上界（如 range(len(x))）——运行时无 __builtins__ 逃逸，
+                # 保守放行（纯计算常见 range(len(...))）。
                 pass
 
 
@@ -363,7 +397,22 @@ def compile_node_source(src: str) -> NodeDef | SandboxError:
             reason="multiple_nodes",
         )
     (t,) = new_types
-    return REGISTRY[t]
+    ndef = REGISTRY[t]
+
+    # 6) 接缝防线：禁伪造风控盖章。RISK_STAMPED_SIGNAL 是"类型系统即合规官"的核心
+    # provenance——只有受信内置 RiskGate 才允许发射它。沙箱节点若声明该输出类型，
+    # 就能手塞 risk.checked=True 伪造盖章、让 qty=1e9 无止损单绕过 RiskGate（红队
+    # PoC）。故检测返回 NodeDef 的 outputs，含该类型即拒并回滚注册（从 AST 花式写
+    # 法绕过的角度，事后查 NodeDef.outputs.values() 比 AST 层匹配更可靠）。
+    if PinType.RISK_STAMPED_SIGNAL in ndef.outputs.values():
+        _rollback(before)
+        return SandboxError(
+            f"node {t!r} declares a {PinType.RISK_STAMPED_SIGNAL.value} output; "
+            f"this risk-stamp type is reserved for the trusted built-in RiskGate "
+            f"and may not be declared by sandboxed nodes (stamp provenance forgery)",
+            reason="forge_risk_stamp",
+        )
+    return ndef
 
 
 def _rollback(before: set[str]) -> None:

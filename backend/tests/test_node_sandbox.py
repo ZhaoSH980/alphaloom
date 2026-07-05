@@ -229,6 +229,127 @@ class TryOpenNode:
 
 
 # ---------------------------------------------------------------------------
+# 接缝防线：沙箱节点不得伪造 RISK_STAMPED_SIGNAL 盖章（绕过 RiskGate 合规官）
+# ---------------------------------------------------------------------------
+
+FAKE_GATE_SOURCE = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="fake_gate", category="decision",
+      inputs={"signal": PinType.SIGNAL},
+      outputs={"stamped": PinType.RISK_STAMPED_SIGNAL},
+      cost=CostAnnotation(deterministic=True))
+class FakeGateNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        sig = dict(inputs["signal"])
+        # 手动塞伪造盖章 —— 真 RiskGate 本会拦 qty=1e9 无止损
+        sig["risk"] = {"checked": True, "blocked": False, "checks": []}
+        return {"stamped": sig}
+'''
+
+
+def test_sandbox_node_cannot_forge_risk_stamp():
+    """声明 RISK_STAMPED_SIGNAL 输出的沙箱节点必须被拒（盖章 provenance 保留给内置）。"""
+    result = compile_node_source(FAKE_GATE_SOURCE)
+    assert isinstance(result, SandboxError)
+    assert result.reason == "forge_risk_stamp"
+    # 伪造盖章发射器绝不进 REGISTRY
+    assert "fake_gate" not in REGISTRY
+
+
+def test_forged_stamp_node_never_reaches_compile_blueprint():
+    """红队 PoC 重放：fake_gate.stamped→execute_order.signal 本应编译通过下大单；
+    现在 fake_gate 在 compile_node_source 阶段就被拒、根本注册不进去，
+    故蓝图引用它 → UNKNOWN_NODE_TYPE，链条从源头断开。"""
+    from alphaloom.graph.compiler import compile_blueprint
+    from alphaloom.graph.model import BlueprintSpec, EdgeSpec, PortRef
+
+    # 先确认沙箱拒绝 → 未注册
+    assert isinstance(compile_node_source(FAKE_GATE_SOURCE), SandboxError)
+    assert "fake_gate" not in REGISTRY
+
+    bp = BlueprintSpec(
+        id="poc", name="poc",
+        nodes=[
+            NodeSpec("fg", "fake_gate", {}),
+            NodeSpec("ex", "execute_order", {}),
+        ],
+        edges=[EdgeSpec(PortRef("fg", "stamped"), PortRef("ex", "signal"))],
+    )
+    res = compile_blueprint(bp)
+    assert not res.ok
+    assert any(e.code == "UNKNOWN_NODE_TYPE" for e in res.errors)
+
+
+def test_risk_gate_remains_sole_stamper_after_sandbox():
+    """伪造被拒后，唯一盖章发射器仍是内置 risk_gate（合规官单点性未被侵蚀）。"""
+    from alphaloom.nodes.registry import REGISTRY as R
+    compile_node_source(FAKE_GATE_SOURCE)  # 被拒，不应污染
+    stampers = [t for t, dd in R.items()
+                if PinType.RISK_STAMPED_SIGNAL in dd.outputs.values()
+                and dd.category != "test"]
+    assert stampers == ["risk_gate"]
+
+
+def test_legit_node_with_signal_output_unaffected():
+    """合法节点产 SIGNAL（非 RISK_STAMPED_SIGNAL）不受伪造盖章防线影响。"""
+    src = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="plain_sig", category="decision",
+      inputs={"candle": PinType.CANDLE}, outputs={"signal": PinType.SIGNAL},
+      cost=CostAnnotation(deterministic=True))
+class PlainSigNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        return {"signal": {"side": "hold", "qty": 0.0, "stop": None, "reason": "ok"}}
+'''
+    d = compile_node_source(src)
+    assert not isinstance(d, SandboxError), getattr(d, "message", d)
+    assert "plain_sig" in REGISTRY
+
+
+# ---------------------------------------------------------------------------
+# 循环上限：变量绑定的 range 上界也须套 MAX_RANGE（字面量已拦、变量勿绕）
+# ---------------------------------------------------------------------------
+
+def test_variable_bound_range_capped():
+    """n = 500000; for _ in range(n) —— 变量绕过字面量检查，必须也拦。"""
+    src = "n = 500000\nfor _ in range(n):\n    pass\n"
+    result = compile_node_source(src)
+    assert isinstance(result, SandboxError)
+    assert result.reason == "loop_bound"
+
+
+def test_small_variable_bound_range_allowed():
+    """小的变量上界（n=100）应放行——纯计算常见，不误伤。"""
+    src = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="loop_ok", category="indicator",
+      inputs={"candle": PinType.CANDLE}, outputs={"value": PinType.SERIES},
+      cost=CostAnnotation(deterministic=True))
+class LoopOkNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        n = 10
+        total = 0.0
+        for i in range(n):
+            total += i
+        return {"value": total}
+'''
+    d = compile_node_source(src)
+    assert not isinstance(d, SandboxError), getattr(d, "message", d)
+
+
+# ---------------------------------------------------------------------------
 # 降级保险丝：受限模板版（LLM 只填参数，不写自由代码）
 # ---------------------------------------------------------------------------
 
