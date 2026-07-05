@@ -301,6 +301,6 @@ nodes/llm_nodes.py：LLMAnalystNode（type=llm_analyst, category=decision, input
 ## T11 真实录制执行结果（控制器 2026-07-05）
 - **真实讯飞验证**：用用户 .env 的真实 astron-code-latest 端点跑了 154 次真实调用（agent_committee 51-bar 委员会 153 调 + copilot 生成 1 调），全部成功，管线对真实 LLM 工作。真实 LLM 在该 51-bar 窗口保守（全 flat/hold，0 交易）——真实行为，非 bug。copilot 首次即产合法风控图（真 LLM 够强，未触发自修复）。
 - **提交的离线演示 = spark-x1 确定性种子**（793 条，seed_recordings.py --verify 验证 903 命中 0 miss 零配额）：富演示含交易/48 否决/46 反思四象限/copilot 自修复（坏图→TYPE_MISMATCH→修正），可复现、任何机器零配额、无需密钥。
-- **合并库**：llm_calls.sqlite = 793 spark-x1（默认离线演示）+ 154 astron（真实讯飞验证记录），model 串不同不冲突。OFFLINE_DEFAULTS=spark-x1（默认走富演示）。
-- **诚实框定（README）**：离线 showcase 用确定性种子响应（清楚标注非真实 LLM 输出，为可复现零配额演示）；管线已对真实讯飞 astron-code-latest 验证（154 真调）。用户可用自己 key 走 live 或 re-record 更长真实窗口。
+- **合并库（修正后实物）**：llm_calls.sqlite = 793 spark-x1（默认离线演示，150 交易/四象限富演示）+ **123** astron（真实讯飞 40-bar 录制，离线验证 123 hits/0 miss 可回放），model 串不同不冲突。OFFLINE_DEFAULTS=spark-x1。**诚实性修正记录**：初次合并的 154 astron 被后续 seed 重跑冲掉且备份误删，commit 4e69d2b 消息不实；已在 commit 8f29adc 重录 123 真实 astron 并入库、离线验证通过。真实 LLM 在该窗口保守（0 交易，真实行为）。
+- **诚实框定（已写入 README）**：离线 showcase 默认用确定性种子响应（清楚标注非真实 LLM 输出，为可复现零配额富演示）；**库里另含 123 条真实讯飞 astron-code-latest 录制（40-bar，离线可回放），证明管线对真实 LLM 工作**。用户插自己 key 可走 live 或 re-record 更长真实窗口。
 - **D4 note**：astron 真实录制的独立离线回放与 seed 脚本代码路径有细微差异未逐一对齐（committee chair handoff 的 request 复现），D4 若要"真实录制可复现回放"需统一 real/fake 两条录制路径的代码。密钥扫描：录制库 0、git 历史 0。
