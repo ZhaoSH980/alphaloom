@@ -74,7 +74,7 @@ def test_break_bridge_pause_resume(tmp_path):
     assert ev["node_id"] == "risk" and "signal" in ev["inputs"]
     svc.command(run_id, "step")            # 放行一次，下一节点即停
     ev2 = _wait_for(events, "paused", 15)
-    assert ev2["node_id"] != "risk" or ev2["event_idx"] != ev["event_idx"]
+    assert ev2["node_id"] != "risk" or ev2["ts"] != ev["ts"]
     svc.command(run_id, "resume")          # 之后每次 risk 命中仍会停 → 连续 resume 清完
     deadline = time.time() + 30
     while time.time() < deadline:
@@ -83,6 +83,19 @@ def test_break_bridge_pause_resume(tmp_path):
         svc.command(run_id, "resume")
         time.sleep(0.05)
     assert svc.store.get(run_id)["status"] == "completed"
+
+def test_raising_sink_does_not_kill_run(tmp_path):
+    db_path = _db(tmp_path, n=40)
+    svc = RunService(store=RunsStore(tmp_path / "runs.sqlite"),
+                     db_path=db_path, record_dir=tmp_path)
+    bp = load_loom_file(REPO / "blueprints" / "ema_cross.loom")
+    def evil_sink(event):
+        raise RuntimeError("ws is gone")
+    run_id = svc.start(bp, _params(tmp_path), sink=evil_sink)
+    svc.join(run_id, timeout=30)
+    row = svc.store.get(run_id)
+    assert row["status"] == "completed"          # 推送失败绝不杀回测
+    assert run_id not in svc._bridges            # 无 bridge 泄漏
 
 def _wait_for(q, typ, timeout):
     deadline = time.time() + timeout

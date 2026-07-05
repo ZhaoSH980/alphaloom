@@ -27,8 +27,10 @@ class BreakBridge:
             if not self.step_mode and node_id not in self.user_breakpoints:
                 return
             self._gate.clear()
+            if self._stopped:
+                return            # stop TOCTOU 闭合：clear 后复检（T2 审查 Important-2）
             self._sink({"type": "paused", "node_id": node_id,
-                        "event_idx": getattr(ev, "ts_close", 0),
+                        "ts": getattr(ev, "ts_close", 0),
                         "inputs": sanitize(_jsonable(inputs))})
             self._gate.wait()
         except Exception:
@@ -52,6 +54,15 @@ def _jsonable(obj):
         return obj
     except (TypeError, ValueError):
         return repr(obj)
+
+def _safe_sink(sink):
+    """sink 是推送路径（WS），它的任何异常都不得影响 run 本身（T2 审查 Important-1）。"""
+    def safe(event):
+        try:
+            sink(event)
+        except Exception:
+            pass
+    return safe
 
 class RunService:
     def __init__(self, store, db_path, record_dir):
@@ -85,6 +96,7 @@ class RunService:
             t.join(timeout)
 
     def _worker(self, run_id, bp, params, sink, bridge):
+        sink = _safe_sink(sink)
         sink({"type": "status", "status": "running"})
         try:
             source = SQLiteMarketData(self.db_path)
