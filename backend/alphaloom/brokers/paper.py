@@ -11,6 +11,9 @@ class PaperBroker:
         self.fills: list[Fill] = []
         self.equity_curve: list[tuple[int, float]] = []
         self._round_trips: list[float] = []
+        # 平仓事件日志（D3 反思闭环接缝）：每笔往返平掉后追加 {ts, pnl, entry_side}，
+        # 供 ReflectorNode 读 ctx.broker.closed_trades 拿最近平仓 pnl（不占决策引脚）。
+        self.closed_trades: list[dict] = []
         self._entry_cost = 0.0
         self._halted = False
         self._halt_reason = ""
@@ -65,7 +68,11 @@ class PaperBroker:
         if closing:
             closed_qty = min(abs(p.qty), abs(signed))
             pnl = (price - p.avg_price) * closed_qty * (1 if p.qty > 0 else -1)
-            self._round_trips.append(pnl - fee - self._entry_cost)
+            net_pnl = pnl - fee - self._entry_cost
+            self._round_trips.append(net_pnl)
+            # entry_side = 被平掉的持仓方向（p.qty>0 是多头往返）
+            self.closed_trades.append(
+                {"ts": ts, "pnl": net_pnl, "entry_side": "long" if p.qty > 0 else "short"})
             self._entry_cost = 0.0
         else:
             self._entry_cost += fee

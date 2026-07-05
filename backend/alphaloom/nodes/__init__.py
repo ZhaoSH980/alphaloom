@@ -8,3 +8,4 @@ import alphaloom.nodes.execution   # noqa: F401,E402
 import alphaloom.nodes.llm_nodes    # noqa: F401,E402
 import alphaloom.nodes.rag_nodes     # noqa: F401,E402
 import alphaloom.nodes.pa_gate       # noqa: F401,E402
+import alphaloom.nodes.reflection    # noqa: F401,E402

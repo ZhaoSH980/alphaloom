@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from alphaloom.graph.types import CostAnnotation, PinType
 from alphaloom.knowledge.corpus import load_default_corpus
+from alphaloom.memory.experience_store import ExperienceStore, derive_regime_bucket
 from alphaloom.nodes.registry import node
+
+# 经验库默认落盘路径（离线演示复用；测试传 db_path 覆盖到 tmp_path）
+_DEFAULT_EXPERIENCE_DB = "data/experience.sqlite"
 
 # 语料库全局缓存：加载一次复用（纯只读，不含随机/网络）。
 _CORPUS = None
@@ -103,3 +107,87 @@ class RequireCitationsNode:
             sig["stop"] = None
             sig["reason"] = "blocked: trade requires non-empty citations"
         return {"signal": sig}
+
+
+# --------------------------------------------------------------------------- #
+# 经验库 RAG：ExperienceRetrieve（按市场状态桶检索历史教训注入决策上下文）
+# --------------------------------------------------------------------------- #
+
+@node(
+    type="experience_retrieve",
+    category="rag",
+    inputs={"candle": PinType.CANDLE, "ema": PinType.SERIES, "atr": PinType.SERIES},
+    outputs={"lessons": PinType.SERIES},
+    params={"db_path": str, "top_k": int},
+    cost=CostAnnotation(
+        llm_calls_per_bar=0,
+        max_tokens_per_call=0,
+        latency_class="fast",
+        deterministic=True,   # 按桶查库是纯检索：同桶同结果，不调 LLM
+    ),
+)
+class ExperienceRetrieveNode:
+    """按当前市场状态桶（ema 斜率+atr 派生）检索经验库，产 lessons 注入决策上下文。
+
+    只需 ``ema`` + ``atr`` 两个引脚（画布上均有真实产出）——**上一根 ema 由节点自身
+    用 ``self.state`` 记住**，不需要画布提供 ``ema_prev`` 这种无产出源的引脚（否则记忆
+    检索在真实蓝图上连不通）。记忆开关的"开"侧：画布连了本节点 → 下游拿到历史教训；
+    不连 → lessons pin 悬空（None）。
+    """
+
+    def setup(self, params):
+        self.db_path = str(params.get("db_path") or _DEFAULT_EXPERIENCE_DB)
+        self.top_k = int(params.get("top_k", 3))
+        self._store = ExperienceStore(self.db_path)
+        self.state.setdefault("ema_prev", None)
+
+    def on_bar(self, ctx, inputs):
+        ema = inputs.get("ema")
+        ema_prev = self.state.get("ema_prev")
+        self.state["ema_prev"] = ema
+        bucket = derive_regime_bucket(ema=ema, ema_prev=ema_prev, atr=inputs.get("atr"))
+        hits = self._store.retrieve(bucket=bucket, top_k=self.top_k)
+        return {"lessons": [h["lesson"] for h in hits]}
+
+
+# --------------------------------------------------------------------------- #
+# 经验库写入：ExperienceWrite（由 Reflector verdict 驱动落库，幂等）
+# --------------------------------------------------------------------------- #
+
+@node(
+    type="experience_write",
+    category="reflection",
+    inputs={"verdict": PinType.SERIES},
+    outputs={"written": PinType.BOOL},
+    params={"db_path": str},
+    cost=CostAnnotation(
+        llm_calls_per_bar=0,
+        max_tokens_per_call=0,
+        latency_class="fast",
+        deterministic=True,   # 落库是确定性副作用，不调 LLM
+    ),
+)
+class ExperienceWriteNode:
+    """收 Reflector 的 verdict → 写经验库（按桶）。verdict None（无平仓那根）→ no-op。
+
+    幂等由 ExperienceStore 的 (bucket, trade_key) 主键 UPSERT 兜底——同一笔平仓
+    反思重复触发也只留一行。
+    """
+
+    def setup(self, params):
+        self.db_path = str(params.get("db_path") or _DEFAULT_EXPERIENCE_DB)
+        self._store = ExperienceStore(self.db_path)
+
+    def on_bar(self, ctx, inputs):
+        verdict = inputs.get("verdict")
+        if not verdict:
+            return {"written": False}
+        self._store.write(
+            bucket=verdict["bucket"],
+            trade_key=verdict["trade_key"],
+            config_summary=verdict.get("config_summary", ""),
+            outcome=verdict["verdict"],
+            pnl=float(verdict.get("pnl", 0.0)),
+            lesson=verdict.get("lesson", ""),
+        )
+        return {"written": True}
