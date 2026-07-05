@@ -40,6 +40,8 @@
 
 **沙箱契约**（port Hindsight sandbox）：`sandbox/node_sandbox.py::compile_node_source(src) -> NodeDef | SandboxError`——AST 白名单（禁 import 白名单外、禁 exec/eval/open/__import__/文件 IO/网络），只允许纯计算 + 声明的 @node 装饰器；通过则热注册进 REGISTRY。降级保险丝：受限模板版（LLM 只填模板参数不写自由代码）。
 
+**T7 红队发现的 Critical 修复（sanctioned）——沙箱节点禁止声明 `RISK_STAMPED_SIGNAL` 输出**：`compile_node_source` 检查 @node 装饰器的 outputs，任何沙箱/自定义节点若声明 `PinType.RISK_STAMPED_SIGNAL` 作输出 → SandboxError（reason=`forge_risk_stamp`）。否则不可信代码能伪造风控盖章、绕过"类型系统即合规官"（execute_order 只吃 RISK_STAMPED_SIGNAL，是信号→实盘单的唯一闸门；名字撞车 risk_gate 已被 registry 拦，但"伪造新盖章发射器"这条路原本开着）。盖章 provenance 保留给受信内置 RiskGate。**Important 顺带修**：非字面 range() 上界也套 MAX_RANGE 上限（堵运行期 DoS 的一半；完整 CPU/内存/超时限额仍 D4 Carryover 3）。
+
 **REST/WS 新增**：`POST /api/copilot/blueprint`（NL→loom，SSE 或返回 diff）；`POST /api/copilot/explain`；`POST /api/copilot/optimize`；`POST /api/nodes/custom`（Text-to-Node 沙箱注册）；run 的 `mode` 参数加 `"replay"`（加速回放，走真实 LLM 或录制）。
 
 ---
