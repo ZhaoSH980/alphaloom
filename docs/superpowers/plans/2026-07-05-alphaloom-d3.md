@@ -31,7 +31,7 @@
 | Committee | decision | 扇出 N 角色（策略师/风控官/主席）→ 结构化 JSON 交接 → 表决；cost = 角色数 |
 | PADecisionTree | decision | 确定性数值门控（不信 LLM 嘴），读 二元决策树规则；cost 全 0 deterministic |
 | KnowledgeRetrieve | rag | BM25 检索自撰知识库，产 citations；cost 0 |
-| RequireCitations | rag | 强制引用门：long/short 但 citations 空 → 降级 hold（T4 实现时 sanctioned 新增——软约定的可组合落地形态，D4 升级编译期盖章类型）；cost 0 |
+| RequireCitations | rag | 强制引用门：long/short 但 citations 空 → 降级 hold；**必须带可选输入 pin `citations: SERIES`**（T4 审查 Critical：无此 pin 时 kr.citations 画布上不可达、正向放行永不发生——pin 值非 None 时合流进 sig["citations"] 再判门）；cost 0（T4 sanctioned 新增，D4 升级编译期盖章类型）|
 | ExperienceRetrieve | rag | 按市场状态桶检索经验；cost 0 |
 | ExperienceWrite | reflection | 平仓后写经验（由 Reflector 驱动）；cost 0 |
 | Reflector | reflection | 过程/结局分离打分（reasonable_but_wrong 分类学，port Hindsight）；cost 可选 LLM |
@@ -213,6 +213,7 @@ nodes/llm_nodes.py：LLMAnalystNode（type=llm_analyst, category=decision, input
 
 - [ ] Step 1 测试：BM25 检索命中相关文档（"martingale risk" → dca.md 段）；KnowledgeRetrieve 产 citations 进 signal（下游可查）；**强制引用**——LLMAnalyst 若连了 KnowledgeRetrieve，citations 非空才允许非 hold（约定在 risk_gate 或单独 test 锁）；PADecisionTree 纯确定性（同输入同输出、cost 全 0 deterministic True）数值门控（如 close>ema 且 atr>阈值才放行 long，否则 hold）——不调 LLM。
 - [ ] Step 2 确认失败
+- **T4 审查修订（sanctioned）**：`_tokenize` 增加 CJK 支持——中日韩字符连串按 2-gram 切分（约 6 行），使 "马丁格尔 爆仓"→dca、"网格 间距"→grid 可命中（语料中英对照但原正则 [a-z0-9]+ 使中文全灭，Studio 中文用户 RAG 断裂）。
 - [ ] Step 3 实现：corpus.py 极简 BM25（分词+idf+bm25 打分，纯 stdlib，语料 3 个自撰 md 文件——**自己写精要不整包搬 PA_Agent 语料**，网格机制/DCA 马丁风险/Al Brooks 价格行为核心概念各一页中英对照）；KnowledgeRetrieveNode(type=knowledge_retrieve, category=rag, inputs query 可选/candle, outputs citations:SERIES 或专用 pin, cost 0)；PADecisionTreeNode(type=pa_decision_tree, category=decision, inputs candle+ema+atr+signal, outputs signal, cost 0 deterministic True)——数值门控收紧/否决上游信号。
 - [ ] Step 4 全量绿（+~5）
 - [ ] Step 5 commit `feat(nodes): KnowledgeRetrieve BM25 RAG + PADecisionTree deterministic gate + hand-written corpus`
