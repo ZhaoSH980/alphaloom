@@ -4,7 +4,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .hypothesis/
-data/sample.sqlite
+data/*.sqlite
 runs/
 .env
 .env.*
