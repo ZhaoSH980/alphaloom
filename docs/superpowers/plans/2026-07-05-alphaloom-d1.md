@@ -103,7 +103,7 @@ alphaloom/                              # 仓库根（已存在 docs/）
 - [ ] **Step 1: 创建 venv 与目录**
 
 ```bash
-cd F:/AIProjects/my_show/alphaloom
+cd <repo-root>   # 仓库根目录
 mkdir -p backend/alphaloom backend/tests blueprints scripts
 python -m venv backend/.venv
 backend/.venv/Scripts/python -m pip install -U pip pytest hypothesis
@@ -2680,3 +2680,40 @@ git tag d1-complete
 16. **Task 10 审查移交（数据层）**：①`random.Random.gauss` 跨 Python 版本算法稳定性无官方保证（3.13.2 跨进程已实测一致）——升级 Python 后金丝雀哈希漂移首查此处；②sqlite 多连接写失败后隐式事务不回滚（连接中毒持 PENDING 锁）——D4 实时接入前加 try/rollback 或 WAL+busy_timeout；③Task 12 CLI `--bar` 加 argparse `choices=`（bar_to_ms 未知值裸 KeyError，含小写 "1h" 陷阱）；④synth 极端 vol 下 low 可为负（默认参数域不可达），可选 lo 地板。
 17. **Task 11 审查移交（对抗输入洞，D1 不可达，D2 前处理）**：①risk_gate 加 `isfinite(stop)/isfinite(qty)` 与 `qty<0` 检查（NaN stop 可穿透全链提交 NaN 卖单——与 15① qty guard 同族一起修）；②sizer 加 `equity<=0 → hold`（负 equity 使 long 信号翻空，需无 kill_switch 图才可达）；③cross_signal 触零复燃（diff [+,0,+] 第三根再发 long）与 RSI 恒价=100 语义备查（D2 指标面板展示注意）。
 18. **Task 12 边角（D2 定夺）**：收盘强平的 qty 在结算 on_bar 前快照——若策略恰在最后一根 bar 发新单，挂单与 eod_close 同价撮合后期末仓位可能非零（同价零损耗，本数据集不可达）。D2 可改为"强平前清空 _pending 再按实际仓位平"。
+
+---
+
+### Task 14: 终审修复批次（D1 收官后追加，全分支终审 READY 附带的小修单）
+
+**Files:**
+- Modify: `backend/alphaloom/nodes/gates.py`（RiskGate side 白名单）
+- Modify: `backend/alphaloom/backtest/runner.py`（bars_per_day 接线 + try/finally + 时序契约 docstring）
+- Modify: `backend/alphaloom/cli.py`（compile 子命令加 --bar 并传 bars_per_day）
+- Modify: `backend/alphaloom/brokers/paper.py`（on_bar docstring 时序契约）
+- Modify: `backend/pyproject.toml`（license/authors 字段）
+- Modify: `backend/tests/test_builtin_nodes.py`（+1 测试：未知 side 被拒）
+- Create: `backend/tests/test_final_seams.py`（+4 测试：bars_per_day 接线、子图全链路、CLI 窗口、CLI 失败路径）
+
+**变更 1 — RiskGate side 白名单**（gates.py，RiskGateNode.on_bar 的 checks 段首插入）：
+
+```python
+        if sig.get("side") not in ("long", "short", "flat", "hold"):
+            checks.append(f"unknown side {sig.get('side')!r}: must be one of long/short/flat/hold")
+```
+
+（注意该检查在既有 `if sig["side"] in ("long","short")` 之前独立执行；blocked 逻辑不变。）
+
+**变更 2 — bars_per_day 接线**：runner.py 将 `bar_ms = bar_to_ms(bar)` 提到 compile 之前，编译改为 `compile_blueprint(bp, bars_per_day=86_400_000 // bar_ms)`；cli.py 的 compile 子命令加 `pc.add_argument("--bar", default="1m", choices=["1m","5m","15m","1H","4H","1D"])` 并同样传 bars_per_day。
+
+**变更 3 — runner 健壮性**：candle 主循环 + 强平段包 `try/finally`，finally 中 `if recorder: recorder.close()`（原顺序路径删除重复 close）；`run_backtest` docstring 首行写明时序契约："每根 bar 先 broker.on_bar（撮合上一根挂单/止损）再 engine.step（本根决策）——次 bar 开盘成交语义的另一半"。paper.py `on_bar` docstring 同步注明"必须先于当根 engine.step 调用"。
+
+**变更 4 — pyproject 元数据**：`[project]` 增加 `license = {text = "MIT"}` 与 `authors = [{name = "Zhao Chenghao"}]`。
+
+**测试**（test_final_seams.py，tb_ 前缀注册测试节点）：
+1. `test_bars_per_day_wired_through_runner`：注册 tb_llm（cost llm_calls_per_bar=1, max_tokens=1000）单节点图，synth 10 根入临时 db，`run_backtest(..., bar="1H")` → `report.certificate["daily_token_ceiling"] == 1 * 1000 * 24`
+2. `test_subgraph_blueprint_full_chain`：子图包裹（ema+cross 组）蓝图 run_backtest 400 根 → 录制含 `sub/` 前缀节点行、bars==400
+3. `test_cli_run_window`：`main(["run", ..., "--start", ..., "--end", ...])` → bars == 窗口根数
+4. `test_cli_compile_failure_json`：绕风控 .loom 写入 tmp → compile rc==1 且 stdout JSON errors 含 TYPE_MISMATCH
+5. test_builtin_nodes.py 追加 `test_risk_gate_rejects_unknown_side`：side="buy" → blocked True、stamped side=="hold"、checks 含 "unknown side"
+
+预期全量：60 passed。Commit：`fix: final-review batch - risk gate side whitelist, cost cert wiring, seam tests, metadata`
