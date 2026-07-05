@@ -101,12 +101,35 @@ alphaloom/
 2. **加速回放**：历史流按 10-60 倍速推进，走完整 live 管线，LLM 真实决策——现场演示"实盘循环"的答案。
 3. **实盘（OKX demo）**：真实时钟 + OKX 公共行情 + demo 盘下单（x-simulated-trading=1，永不碰真钱）；Trade-Tools 四层安全思想内化为节点链 + KillSwitch。
 
-## 5. Copilot（贯穿全站的侧栏）
+## 5. Agent 架构（面试主叙事）
 
-- **Text-to-Blueprint**："搭一个 ETH 突破策略，加移动止损，回撤别超 10%" → 图 JSON（schema 校验+dagre 自动布局）→ **diff 预览** → 应用 → 一键回测。演示核弹。
-- **Explain**：选中图/子图 → 自然语言解释它在干什么。
-- **Optimize**：读回测报告 → 提出图变异建议（diff 形式）。
-- 所有生成物过图编译器 + 风控类型检查，Copilot 也造不出危险策略。
+**叙事主次（v4 明确，用户要求以此证明 Agent 设计能力）**：Agent 是主角，编译器是配角——编译器+回测+记分卡构成 Agent 的**可验证反馈环境**（coding agent 成功配方移植到交易域）；编译器报错为 LLM 消费设计（结构化 JSON + 修复提示，双受众：人+Agent）。demo-script 与 README 均以 Agent 故事开场，编译器作为支撑出场。
+
+### 5.1 图上层：Copilot 元 Agent（旗舰证明，贯穿全站侧栏）
+完整 ReAct Agent，工具面即平台 API：`compile_graph` / `run_backtest` / `read_scorecard` / `mutate_graph` / `register_node`（Text-to-Node）。能力：
+- **Text-to-Blueprint**："搭一个 ETH 突破策略，加移动止损，回撤别超 10%" → 图 JSON（schema 校验+dagre 自动布局）→ **diff 预览** → 应用 → 一键回测。
+- **编译错误自修复（杀手演示时刻）**：Copilot 生成的图被编译器打回（因果/风控类型错误）→ 读结构化报错 → 自行修图 → 重新提交，全程 ReAct 轨迹可视化。血统：PA_Agent validation_retry（schema 校验、结构化反馈重试、防作弊字段）。
+- **Explain**：选中图/子图 → 自然语言解释。
+- **Optimize**：读回测报告 → 图变异建议（diff 形式）→ 进化实验室的变异算子同源。
+- 所有生成物过编译器+风控类型检查，Copilot 也造不出危险策略。
+
+### 5.2 图内层：交易 Agent 架构模式
+- **委员会**：角色分工（策略师/风控官/主席）+ 结构化 JSON 交接 + 否决权，非聊天记录堆叠。
+- **确定性-LLM 混合决策**：PADecisionTree 数值门控（不信 LLM 嘴）+ LLMAnalyst 语义判断，各司其职。
+- **强制引用 RAG**：决策 JSON 必须携带 KnowledgeRetrieve 命中的引用字段，前端徽章可视化。
+- **反思闭环**：过程/结局分离打分 → 经验库 → 回灌（§7）。
+- **可测量记忆**：开/关对比，诚实回答"记忆有没有用"。
+
+### 5.3 面试能力映射表
+| JD 考察点 | AlphaLoom 证据 |
+|---|---|
+| 工具设计 | Copilot 工具面（为 Agent 设计工具；报错即提示词） |
+| ReAct | Copilot 循环全程可视化 + 自修复轨迹 |
+| 多智能体 | 委员会节点（分工/交接/否决） |
+| RAG | 引用强制 + 检索徽章 |
+| 记忆 | 反思闭环 + 开关消融 |
+| 评估设计 | 记分卡/基线排行榜/保真度阶梯/泛化差距 |
+| Agent 安全 | 环境层类型约束（编译器只占此一格） |
 
 ## 6. 进化实验室（"Agent 即研究员"的终极形态）
 
