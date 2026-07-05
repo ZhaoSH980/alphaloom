@@ -118,3 +118,176 @@ class LLMAnalystNode:
             "side": side, "qty": 0.0, "stop": stop, "reason": rationale,
             "rationale": rationale, "confidence": confidence, "citations": [],
         }}
+
+
+# --------------------------------------------------------------------------- #
+# Committee 节点：策略师 → 风控官 → 主席（三角色扇出 + 结构化 JSON 交接 + 表决）
+# --------------------------------------------------------------------------- #
+
+_STRATEGIST_SYSTEM = (
+    "You are {persona}, the committee's strategist. Read the latest candle and ATR, "
+    "then propose a trade. Reply with ONLY a JSON object: "
+    '{{"side": "long|short|flat|hold", "rationale": "<one sentence>", '
+    '"confidence": <0..1 float>}}. No prose outside the JSON.'
+)
+
+_RISK_SYSTEM = (
+    "You are {persona}, the committee's risk officer. You are given the strategist's "
+    "proposal as JSON. Scrutinize it for risk. Reply with ONLY a JSON object: "
+    '{{"veto": <true|false>, "concern": "<one sentence>", '
+    '"confidence": <0..1 float>}}. Set veto=true to block the trade outright. '
+    "No prose outside the JSON."
+)
+
+_CHAIR_SYSTEM = (
+    "You are {persona}, the committee chair. You are given the strategist's proposal "
+    "and the risk officer's assessment as JSON. Synthesize the final decision. "
+    "If the risk officer vetoed, you MUST return side=hold. Reply with ONLY a JSON "
+    'object: {{"side": "long|short|flat|hold", "rationale": "<one sentence>", '
+    '"confidence": <0..1 float>}}. No prose outside the JSON.'
+)
+
+_DEFAULT_PERSONAS = {
+    "strategist": "a disciplined strategist",
+    "risk": "a conservative risk officer",
+    "chair": "an impartial chair",
+}
+
+
+@node(
+    type="committee",
+    category="decision",
+    inputs={"candle": PinType.CANDLE, "atr": PinType.SERIES},
+    outputs={"signal": PinType.SIGNAL},
+    params={
+        "atr_mult": float,
+        # 可选人格/提示词覆盖（每角色一份）
+        "strategist_persona": str,
+        "risk_persona": str,
+        "chair_persona": str,
+        "strategist_prompt": str,
+        "risk_prompt": str,
+        "chair_prompt": str,
+    },
+    cost=CostAnnotation(
+        llm_calls_per_bar=3,   # 三角色各一次（策略师/风控官/主席）
+        max_tokens_per_call=512,
+        latency_class="llm",
+        deterministic=False,   # 调 LLM → 非确定性（D1 Carryover 10）
+    ),
+)
+class CommitteeNode:
+    """委员会决策：策略师提案 → 风控官表决(可 veto) → 主席合成终案。
+
+    结构化 JSON 交接——每角色输出 JSON，下游角色的 user prompt 里含上游 JSON。
+    风控官 veto → 主席终案强制 side=hold。任一角色坏 JSON → 整体回退 hold
+    （rationale 指明哪个角色 parse 失败）。输出 signal 附加
+    committee_trace:[strategist_json, risk_json, chair_json] 供前端展示。
+    """
+
+    def setup(self, params):
+        self.atr_mult = float(params.get("atr_mult", 2.0))
+        self.strategist_persona = str(
+            params.get("strategist_persona", _DEFAULT_PERSONAS["strategist"]))
+        self.risk_persona = str(
+            params.get("risk_persona", _DEFAULT_PERSONAS["risk"]))
+        self.chair_persona = str(
+            params.get("chair_persona", _DEFAULT_PERSONAS["chair"]))
+        self.strategist_prompt = str(params.get("strategist_prompt", _STRATEGIST_SYSTEM))
+        self.risk_prompt = str(params.get("risk_prompt", _RISK_SYSTEM))
+        self.chair_prompt = str(params.get("chair_prompt", _CHAIR_SYSTEM))
+
+    def _hold(self, rationale, trace):
+        return {"signal": {
+            "side": "hold", "qty": 0.0, "stop": None, "reason": rationale,
+            "rationale": rationale, "confidence": 0.0, "citations": [],
+            "committee_trace": trace,
+        }}
+
+    def _ask(self, ctx, system, user, *, role, ts):
+        messages = [{"role": "system", "content": system},
+                    {"role": "user", "content": user}]
+        response = ctx.llm.chat(messages, temperature=0.2)
+        if ctx.audit is not None:
+            ctx.audit.record(
+                tool=f"committee:{role}",
+                params={"node": getattr(self, "node_id", "committee"), "role": role},
+                data_max_ts=ts,
+                note=f"committee {role} turn",
+            )
+        return _extract_json(_content(response))
+
+    def on_bar(self, ctx, inputs):
+        if ctx.llm is None:
+            raise RuntimeError(
+                "no LLM client bound; run via the service or pass llm= to run_backtest")
+        candle, atr = inputs["candle"], inputs["atr"]
+        close = float(candle["close"])
+        ts = int(candle["ts"])
+        atr_val = None if atr is None else float(atr)
+
+        market = json.dumps({
+            "close": close, "high": float(candle["high"]), "low": float(candle["low"]),
+            "atr": atr_val,
+        }, sort_keys=True)
+
+        # --- 角色 1：策略师（读 candle+atr → 提案） ---
+        strat_sys = self.strategist_prompt.format(persona=self.strategist_persona)
+        strat_json = self._ask(ctx, strat_sys, market, role="strategist", ts=ts)
+        if not isinstance(strat_json, dict) or strat_json.get("side") not in _VALID_SIDES:
+            return self._hold("strategist parse failed", [])
+
+        # --- 角色 2：风控官（读策略师 JSON → veto/收紧） ---
+        risk_sys = self.risk_prompt.format(persona=self.risk_persona)
+        risk_user = json.dumps(
+            {"market": json.loads(market), "strategist": strat_json}, sort_keys=True)
+        risk_json = self._ask(ctx, risk_sys, risk_user, role="risk", ts=ts)
+        if not isinstance(risk_json, dict) or "veto" not in risk_json:
+            return self._hold("risk officer parse failed", [strat_json])
+        veto = bool(risk_json.get("veto"))
+
+        # --- 角色 3：主席（读策略师+风控官两份 JSON → 合成终案） ---
+        chair_sys = self.chair_prompt.format(persona=self.chair_persona)
+        chair_user = json.dumps(
+            {"strategist": strat_json, "risk_officer": risk_json}, sort_keys=True)
+        chair_json = self._ask(ctx, chair_sys, chair_user, role="chair", ts=ts)
+        if not isinstance(chair_json, dict) or chair_json.get("side") not in _VALID_SIDES:
+            return self._hold("chair parse failed", [strat_json, risk_json])
+
+        trace = [strat_json, risk_json, chair_json]
+
+        # 风控官 veto → 终案强制 hold（尊重否决，不信主席嘴）
+        if veto:
+            return self._hold(
+                f"risk officer vetoed: {risk_json.get('concern', '')}".strip(), trace)
+
+        side = chair_json.get("side")
+        if side not in ("long", "short"):
+            # 主席自选 flat/hold：无 stop
+            rationale = str(chair_json.get("rationale", ""))
+            try:
+                confidence = float(chair_json.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            return {"signal": {
+                "side": side, "qty": 0.0, "stop": None, "reason": rationale,
+                "rationale": rationale, "confidence": confidence, "citations": [],
+                "committee_trace": trace,
+            }}
+
+        rationale = str(chair_json.get("rationale", ""))
+        try:
+            confidence = float(chair_json.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        stop = None
+        if atr_val is not None:
+            stop = close - self.atr_mult * atr_val if side == "long" \
+                else close + self.atr_mult * atr_val
+
+        return {"signal": {
+            "side": side, "qty": 0.0, "stop": stop, "reason": rationale,
+            "rationale": rationale, "confidence": confidence, "citations": [],
+            "committee_trace": trace,
+        }}
