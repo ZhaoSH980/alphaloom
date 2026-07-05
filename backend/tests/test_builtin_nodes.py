@@ -119,6 +119,14 @@ def test_risk_gate_stamps_and_blocks():
     too_big = gate.on_bar(ctx, {"signal": {"side": "long", "qty": 99.0, "stop": 95.0, "reason": "x"}})
     assert too_big["blocked"] is True
 
+def test_risk_gate_rejects_unknown_side():
+    ctx = _ctx()
+    gate = create_instance(NodeSpec("r", "risk_gate", {"max_qty": 5.0, "require_stop": True}))
+    out = gate.on_bar(ctx, {"signal": {"side": "buy", "qty": 1.0, "stop": 95.0, "reason": "x"}})
+    assert out["blocked"] is True
+    assert out["stamped"]["side"] == "hold"
+    assert any("unknown side" in c for c in out["stamped"]["risk"]["checks"])
+
 def test_risk_gate_is_sole_stamper():
     d = get_node_def("risk_gate")
     from alphaloom.graph.types import PinType

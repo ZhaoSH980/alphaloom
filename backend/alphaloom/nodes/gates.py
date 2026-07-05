@@ -79,6 +79,8 @@ class RiskGateNode:
     def on_bar(self, ctx, inputs):
         sig = dict(inputs["signal"])
         checks: list[str] = []
+        if sig.get("side") not in ("long", "short", "flat", "hold"):
+            checks.append(f"unknown side {sig.get('side')!r}: must be one of long/short/flat/hold")
         if sig["side"] in ("long", "short"):
             if self.require_stop and sig.get("stop") is None:
                 checks.append("missing stop: attach a stop-loss to every entry signal")

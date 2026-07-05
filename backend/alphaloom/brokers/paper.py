@@ -37,6 +37,9 @@ class PaperBroker:
         return self.cash + self._pos.qty * self._last_close
 
     def on_bar(self, candle: dict) -> None:
+        """时序契约：必须先于当根 engine.step 调用——本方法以当根开盘价撮合
+        上一根 bar 决策提交的挂单并检查止损（次 bar 开盘成交语义的另一半，
+        见 run_backtest 主循环）。"""
         o = float(candle["open"])
         pending, self._pending = self._pending, []
         for od in pending:

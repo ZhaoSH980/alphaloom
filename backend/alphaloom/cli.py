@@ -11,6 +11,8 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     pc = sub.add_parser("compile", help="compile a .loom blueprint")
     pc.add_argument("blueprint")
+    pc.add_argument("--bar", default="1m",
+                    choices=["1m", "5m", "15m", "1H", "4H", "1D"])
     pr = sub.add_parser("run", help="backtest a .loom blueprint")
     pr.add_argument("blueprint")
     pr.add_argument("--db", required=True)
@@ -23,12 +25,13 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
 
     import alphaloom.nodes  # noqa: F401
+    from alphaloom.data.source import bar_to_ms
     from alphaloom.graph.compiler import compile_blueprint
     from alphaloom.graph.model import load_loom_file
 
     bp = load_loom_file(args.blueprint)
     if args.cmd == "compile":
-        r = compile_blueprint(bp)
+        r = compile_blueprint(bp, bars_per_day=86_400_000 // bar_to_ms(args.bar))
         print(json.dumps({
             "ok": r.ok,
             "errors": [e.to_dict() for e in r.errors],

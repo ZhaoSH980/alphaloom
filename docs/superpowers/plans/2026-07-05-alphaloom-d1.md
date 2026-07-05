@@ -2713,7 +2713,8 @@ git tag d1-complete
 1. `test_bars_per_day_wired_through_runner`：注册 tb_llm（cost llm_calls_per_bar=1, max_tokens=1000）单节点图，synth 10 根入临时 db，`run_backtest(..., bar="1H")` → `report.certificate["daily_token_ceiling"] == 1 * 1000 * 24`
 2. `test_subgraph_blueprint_full_chain`：子图包裹（ema+cross 组）蓝图 run_backtest 400 根 → 录制含 `sub/` 前缀节点行、bars==400
 3. `test_cli_run_window`：`main(["run", ..., "--start", ..., "--end", ...])` → bars == 窗口根数
-4. `test_cli_compile_failure_json`：绕风控 .loom 写入 tmp → compile rc==1 且 stdout JSON errors 含 TYPE_MISMATCH
-5. test_builtin_nodes.py 追加 `test_risk_gate_rejects_unknown_side`：side="buy" → blocked True、stamped side=="hold"、checks 含 "unknown side"
+4. `test_cli_compile_failure_json`：绕风控 .loom 写入 tmp → `compile --bar 1H` rc==1 且 stdout JSON errors 含 TYPE_MISMATCH（顺带覆盖 compile 子命令接受 --bar）
+5. `test_cli_compile_bar_wires_bars_per_day`：tb_llm 单节点 .loom 写入 tmp → `compile --bar 1H` 证书 daily_token_ceiling==24_000 —— CLI compile 侧 bars_per_day 接线的直接观测（sanctioned addition：原清单 4+1=5 个新测试只到 59，与下文"预期 60 passed"差 1，本项补齐并覆盖变更 2 的 CLI 半边）
+6. test_builtin_nodes.py 追加 `test_risk_gate_rejects_unknown_side`：side="buy" → blocked True、stamped side=="hold"、checks 含 "unknown side"
 
 预期全量：60 passed。Commit：`fix: final-review batch - risk gate side whitelist, cost cert wiring, seam tests, metadata`
