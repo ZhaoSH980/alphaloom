@@ -106,6 +106,7 @@ export default function Studio() {
   }, [setNodes]);
 
   const run = async () => {
+    sock.current?.close();               // 关旧连接，防重复 Run 泄漏 WS（T6 审查 Important）
     const { run_id } = await startRun({ blueprint: currentLoom(), inst: "BTC-USDT-SWAP",
       bar: "1m", playback_ms: 15, ws_wait_ms: 300, breakpoints: [...bps] });
     setRunState({ id: run_id, status: "running" });
