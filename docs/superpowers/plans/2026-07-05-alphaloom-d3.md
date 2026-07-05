@@ -289,3 +289,4 @@ nodes/llm_nodes.py：LLMAnalystNode（type=llm_analyst, category=decision, input
 6. citations 合流：signal 自带 + pin 若携同一条 citation 会输出重复（真实蓝图不触发——LLM 节点自带 citations 恒空、pin 唯一来源；前端引用徽章可选 `dict.fromkeys` 去重，D4）。
 7. CJK 2-gram 改变了 BM25 全局统计量使英文绝对分值变化（排序不变、当前无 score 阈值依赖）——D4 若加 score 门限逻辑需重标定。
 5. `_extract_json` 字符级平衡扫描不识别 JSON 字符串值内的孤立花括号（fail-safe 回退 hold，被 system prompt "No prose outside JSON" 覆盖）——T2/T3 复用它，若想硬化改 `json.JSONDecoder().raw_decode()` 从 `{` 逐位尝试（D4）。
+9. 沙箱运行期 DoS 残留（T7 红队复审，D4）：①算术传播/AugAssign 上界绕过 MAX_RANGE（`m=n*3;range(m)`、`n+=500000`）——运行时 builtins 受限无逃逸面，仅 CPU-per-bar 有界 DoS，与完整资源限额一并 D4；②`compile_node_source` 未校验 outputs/inputs 值必须是真 PinType——`outputs={'stamped':[RSS]}`（list）能注册、引用时 `compiler.py t_out.value` 崩 AttributeError（非伪造逃逸，list 身份≠enum 连不到 execute_order，仅潜在编译期崩溃）——@node 装饰器或沙箱应校验 pin 值类型。
