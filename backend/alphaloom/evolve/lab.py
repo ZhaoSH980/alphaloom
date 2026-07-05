@@ -381,7 +381,8 @@ def evolve(seed_blueprint: BlueprintSpec, source, *, inst: str, bar: str,
            train_window, valid_window, llm, population: int = 4,
            generations: int = 3, mutations_per_gen: int | None = None,
            param_only: bool = False, initial_cash: float = 10_000.0,
-           fee_rate: float = 0.0005, temperature: float = 0.3) -> Genealogy:
+           fee_rate: float = 0.0005, temperature: float = 0.3,
+           defs=None) -> Genealogy:
     """进化循环（模块 docstring 有全貌）。返回完整谱系树 :class:`Genealogy`。
 
     - ``train_window`` / ``valid_window``：``(start_ms, end_ms)``（None = 开区间端）。
@@ -415,8 +416,13 @@ def evolve(seed_blueprint: BlueprintSpec, source, *, inst: str, bar: str,
             f"train_window {train_w} and valid_window {valid_w} overlap - the "
             "validation window must never be touched by the evolution loop")
 
-    from alphaloom.nodes.registry import REGISTRY
-    defs = REGISTRY
+    # ``defs``：变异算子系统提示里的节点目录来源（也用于孩子编译校验）。默认全局
+    # REGISTRY（含运行期注册的自定义节点）。**离线 demo 回放**须传录制时的同一目录
+    # （内置节点子集）——否则运行期多注册一个自定义节点即改变目录字符串 → 变异请求
+    # hash 变 → 种子录制 miss（D4-T8：demo 端点传 built-in-only 视图以稳定命中）。
+    if defs is None:
+        from alphaloom.nodes.registry import REGISTRY
+        defs = REGISTRY
 
     def _run_train(bp: BlueprintSpec):
         return run_backtest(bp, source, inst=inst, bar=bar,

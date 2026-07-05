@@ -390,6 +390,58 @@ def test_ablation_no_committee_blueprint_422(tmp_path):
     assert r.status_code < 500
 
 
+# --------------------------------------------------------------------------- #
+# demo=True 离线预设：服务端硬用 demo_coords 规范坐标 → 命中种子录制回放（D4-T8 修复）
+# --------------------------------------------------------------------------- #
+def _offline_seed_replay_client():
+    """指向真实种子库（data/llm_calls.sqlite, model=spark-x1, offline）的 RecordingLLMClient。
+
+    offline=True → 命中即读、miss 即抛（绝不写库、绝不触网）——安全用于 demo 回放断言。
+    """
+    from alphaloom.llm.recording import RecordingLLMClient
+
+    def _forbidden(_request):
+        raise AssertionError("offline demo replay must not hit the network")
+
+    return RecordingLLMClient(
+        _forbidden, REPO / "data" / "llm_calls.sqlite",
+        model="spark-x1", offline=True)
+
+
+def _make_demo_app(llm_client):
+    """用真实 demo.sqlite 市场数据 + 真实预置蓝图目录建 app（demo 预设服务端硬用坐标）。"""
+    app = create_app(
+        db_path=REPO / "data" / "demo.sqlite", runs_db=":memory:",
+        record_dir=REPO / "data", blueprints_dir=REPO / "blueprints",
+        user_blueprints_dir=REPO / "data" / "user_bp_test",
+        frontend_dist=REPO / "data" / "no_dist", llm_client=llm_client)
+    return TestClient(app)
+
+
+@pytest.mark.skipif(
+    not (REPO / "data" / "llm_calls.sqlite").exists(),
+    reason="seed recordings db (data/llm_calls.sqlite) not present")
+def test_ablation_demo_preset_hits_seed_offline_200(tmp_path):
+    """demo=True：忽略请求体坐标，服务端硬用 demo_coords → 命中种子录制离线回放，
+    200 + 0 cache miss（离线可渲染消融表）。请求体故意塞垃圾坐标以证被忽略。"""
+    llm = _offline_seed_replay_client()
+    client = _make_demo_app(llm)
+    r = client.post("/api/eval/ablation", json={
+        "demo": True,
+        # 下列坐标故意错乱——demo=True 应全部忽略，改用 demo_coords 规范坐标。
+        "blueprint": {"garbage": True}, "inst": "WRONG", "bar": "4H",
+        "start_ms": 999_999_999, "end_ms": 999_999_999})
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    arms = {a["arm"] for a in rep["arms"]}
+    assert "full" in arms and "no_risk_officer" in arms
+    assert rep["guardrail_value"] is not None
+    assert "Infinity" not in json.dumps(rep)
+    # 零配额自证：命中种子录制、零 miss（真的离线回放，没触网）。
+    assert llm.cache_hits > 0
+    assert llm.cache_misses == 0
+
+
 # =========================================================================== #
 # /api/evolve
 # =========================================================================== #
@@ -456,6 +508,33 @@ def test_evolve_bad_blueprint_422(tmp_path):
                           "bar": "1m", "train_start_ms": 0, "train_end_ms": 100,
                           "valid_start_ms": 200, "valid_end_ms": 300})
     assert r.status_code == 422, r.text
+
+
+@pytest.mark.skipif(
+    not (REPO / "data" / "llm_calls.sqlite").exists(),
+    reason="seed recordings db (data/llm_calls.sqlite) not present")
+def test_evolve_demo_preset_hits_seed_offline_200(tmp_path):
+    """demo=True：忽略请求体坐标/规模，服务端硬用 demo_coords → 命中种子录制离线回放，
+    200 + 0 cache miss（离线可渲染谱系树）。请求体故意塞垃圾坐标以证被忽略。"""
+    llm = _offline_seed_replay_client()
+    client = _make_demo_app(llm)
+    r = client.post("/api/evolve", json={
+        "demo": True,
+        # 下列坐标/规模故意错乱——demo=True 应全部忽略，改用 demo_coords 规范坐标。
+        "blueprint": {"garbage": True}, "inst": "WRONG", "bar": "4H",
+        "train_start_ms": 1, "train_end_ms": 2,
+        "valid_start_ms": 3, "valid_end_ms": 4,
+        "population": 4, "generations": 3, "param_only": False})
+    assert r.status_code == 200, r.text
+    g = r.json()
+    assert set(g) >= {"nodes", "winner", "param_only", "population", "generations"}
+    # 服务端硬用 demo 规范规模（pop=2/gen=2/param_only），忽略请求体的 4/3/False。
+    assert g["param_only"] is True
+    assert g["population"] == 2 and g["generations"] == 2
+    assert any(n["id"] == "g0_seed" for n in g["nodes"])
+    assert "Infinity" not in json.dumps(g)
+    assert llm.cache_hits > 0
+    assert llm.cache_misses == 0
 
 
 # =========================================================================== #

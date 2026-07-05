@@ -49,6 +49,14 @@ sys.path.insert(0, str(_ROOT / "backend"))
 from alphaloom.copilot import blueprint as _copilot  # noqa: E402
 from alphaloom.data.sqlite_source import SQLiteMarketData  # noqa: E402
 from alphaloom.eval.ablation import committee_ablation  # noqa: E402
+# 消融/进化 demo 的官方规范坐标 —— **单一真源在后端**（eval/demo_coords.py）。
+# seed 从后端 import（而非自己定义），确保 seed 与 /api 端点永远同源、杜绝漂移
+# （D4-T8 修复）。此处 import 的坐标值即录制用值，逐字与端点 demo=True 一致。
+from alphaloom.eval.demo_coords import (  # noqa: E402
+    DEMO_ABLATION_BLUEPRINT_ID, DEMO_ABLATION_START_MS, DEMO_ABLATION_END_MS,
+    DEMO_EVOLVE_BLUEPRINT_ID, DEMO_EVOLVE_TRAIN, DEMO_EVOLVE_VALID,
+    DEMO_EVOLVE_POPULATION, DEMO_EVOLVE_GENERATIONS, DEMO_EVOLVE_PARAM_ONLY,
+    DEMO_INST as _DEMO_INST, DEMO_BAR as _DEMO_BAR)
 from alphaloom.evolve.lab import evolve  # noqa: E402
 from alphaloom.graph.model import load_loom_file  # noqa: E402
 from alphaloom.llm.recording import RecordingLLMClient  # noqa: E402
@@ -67,29 +75,19 @@ DEMO_BLUEPRINT = _ROOT / "blueprints" / "agent_committee.loom"
 
 # 演示回测窗口：demo.sqlite 的 BTC-USDT-SWAP 1m 一段（够 warmup + 若干笔交易，
 # 又不至于把录制库撑大——committee 每根 bar 3 次 LLM 调用，窗口越大录制条目越多）。
-DEMO_INST = "BTC-USDT-SWAP"
-DEMO_BAR = "1m"
+# inst/bar 用后端共享真源（demo_coords）——committee demo 与消融/进化同标的同周期。
+DEMO_INST = _DEMO_INST
+DEMO_BAR = _DEMO_BAR
 DEMO_START_MS = 0
 DEMO_END_MS = 300 * 60_000  # 前 ~300 根 1m bar
 
-# --- 消融演示"官方坐标"（/api/eval/ablation）------------------------------- #
-# 小窗口（50 根 1m bar，与 D3 astron 的 40-bar 量级一致，控制种子数量）。committee
-# 每 bar 3 次 LLM 调用，2 个独立臂（full / no_risk_officer；no_rag 与 full 逐字相同
-# → 回放命中 full 录制）。inst/bar/blueprint 与 committee demo 复用同一招牌蓝图。
-DEMO_ABLATION_BLUEPRINT = DEMO_BLUEPRINT
-DEMO_ABLATION_START_MS = 0
-DEMO_ABLATION_END_MS = 49 * 60_000        # ts 0..2_940_000（含端，50 根 bar）
+# --- 消融演示"官方坐标" —— 从后端 demo_coords import（单一真源，见文件头 import）。
+# 端点 demo=True 与本录制逐字同坐标 → 离线全命中回放。blueprint 复用招牌蓝图；
+# demo_coords 只存 blueprint_id，此处映射回本仓库 .loom 路径（seed 走文件加载）。
+DEMO_ABLATION_BLUEPRINT = _ROOT / "blueprints" / f"{DEMO_ABLATION_BLUEPRINT_ID}.loom"
 
-# --- 进化演示"官方坐标"（/api/evolve）-------------------------------------- #
-# ema_cross 种子（回测零 LLM，唯一 LLM 消耗 = 变异算子）。param_only 保守、小规模
-# population=2 generations=2。train 窗种子真实成交（负收益 → 好变异有超越空间），
-# valid 窗与 train 不重叠且远离（防泄漏；evolve 入口 _windows_overlap 硬校验）。
-DEMO_EVOLVE_BLUEPRINT = _ROOT / "blueprints" / "ema_cross.loom"
-DEMO_EVOLVE_TRAIN = (57_600_000, 61_140_000)   # 60 bar，种子成交 5 笔、return≈-7%
-DEMO_EVOLVE_VALID = (68_400_000, 71_940_000)   # 60 bar，与 train 无重叠（间隔充分）
-DEMO_EVOLVE_POPULATION = 2
-DEMO_EVOLVE_GENERATIONS = 2
-DEMO_EVOLVE_PARAM_ONLY = True
+# --- 进化演示"官方坐标" —— 同样从后端 demo_coords import（单一真源）。
+DEMO_EVOLVE_BLUEPRINT = _ROOT / "blueprints" / f"{DEMO_EVOLVE_BLUEPRINT_ID}.loom"
 
 
 # --------------------------------------------------------------------------- #

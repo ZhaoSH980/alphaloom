@@ -71,14 +71,20 @@ class EvalLeaderboardIn(BaseModel):
 
 
 class EvalAblationIn(BaseModel):
-    """委员会消融：三臂图手术，量化护栏价值（LLM 蓝图须 offline 回放）。"""
-    blueprint: dict
-    inst: str
+    """委员会消融：三臂图手术，量化护栏价值（LLM 蓝图须 offline 回放）。
+
+    ``demo=True``：离线 demo 预设——端点**忽略请求体其他坐标**，改用后端规范 demo
+    坐标（``eval.demo_coords``：招牌 committee 蓝图 + 固定 50-bar 窗），命中种子录制的
+    确定性回放（离线零配额可渲染消融表）。``demo=False``（默认）：用请求坐标（真实/在线）。
+    """
+    blueprint: dict | None = None      # demo=True 时忽略；demo=False 时必填
+    inst: str | None = None            # demo=True 时忽略；demo=False 时必填
     bar: str = "1m"
     start_ms: int | None = Field(default=None, ge=0, le=_TS_MAX)
     end_ms: int | None = Field(default=None, ge=0, le=_TS_MAX)
     initial_cash: float = 10_000.0
     fee_rate: float = 0.0005
+    demo: bool = False
 
 
 class EvalScorecardIn(BaseModel):
@@ -96,9 +102,15 @@ class EvalScorecardIn(BaseModel):
 
 
 class EvolveIn(BaseModel):
-    """进化实验室：LLM 变异算子 + 编译守门 + 谱系树（规模硬锁定）。"""
-    blueprint: dict
-    inst: str
+    """进化实验室：LLM 变异算子 + 编译守门 + 谱系树（规模硬锁定）。
+
+    ``demo=True``：离线 demo 预设——端点**忽略请求体其他坐标/规模**，改用后端规范
+    demo 坐标（``eval.demo_coords``：ema_cross 种子 + 固定 train/valid 窗 + pop=2/gen=2/
+    param_only），命中种子录制的确定性回放（离线零配额可渲染谱系树）。``demo=False``
+    （默认）：用请求坐标（真实/在线）。
+    """
+    blueprint: dict | None = None      # demo=True 时忽略；demo=False 时必填
+    inst: str | None = None            # demo=True 时忽略；demo=False 时必填
     bar: str = "1m"
     train_start_ms: int | None = Field(default=None, ge=0, le=_TS_MAX)
     train_end_ms: int | None = Field(default=None, ge=0, le=_TS_MAX)
@@ -111,3 +123,4 @@ class EvolveIn(BaseModel):
     param_only: bool = False
     initial_cash: float = 10_000.0
     fee_rate: float = 0.0005
+    demo: bool = False

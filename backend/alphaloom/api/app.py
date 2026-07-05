@@ -342,6 +342,19 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         from alphaloom.data.sqlite_source import SQLiteMarketData
         return SQLiteMarketData(db_path)
 
+    def _load_demo_blueprint(basename: str):
+        """按文件名从预置 blueprints_dir 加载 demo 蓝图（消融/进化 demo 预设服务端硬用）。
+
+        坐标真源是 ``eval.demo_coords`` 的 ``*_BLUEPRINT_ID``（文件基名，与 seed 录制
+        逐字同源）。找不到即 500——这是部署缺文件的运维错误，不该静默成回放 miss。
+        """
+        f = Path(blueprints_dir) / f"{basename}.loom"
+        if not f.exists():
+            raise HTTPException(
+                500, f"demo blueprint {basename!r} missing from presets; "
+                     "offline demo preset cannot run")
+        return loads_loom(f.read_text(encoding="utf-8"))
+
     @app.post("/api/eval/fidelity")
     def eval_fidelity(body: EvalFidelityIn):
         """保真度阶梯 L0-L3（回测测谎仪，零 LLM 配额）：从一个已完成 run 取
@@ -442,18 +455,30 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         节点必然为真（committee）——须 offline 客户端（否则 409）。offline 空录制
         库的 ReplayMissError → 干净 422（带解释），不是 500 栈。"""
         from alphaloom.eval.ablation import DEFAULT_ARMS, committee_ablation
+        from alphaloom.eval import demo_coords as _dc
         from alphaloom.llm.recording import ReplayMissError
-        if body.bar not in _BARS:
-            raise HTTPException(422, f"bar must be one of {_BARS}")
-        try:
-            bp = loads_loom(json.dumps(body.blueprint))
-        except (ValueError, KeyError, TypeError) as exc:
-            raise HTTPException(422, f"bad loom: {exc}")
-        _guard_llm_blueprint(_compile_or_422(bp, body.bar))
+        # demo=True：离线 demo 预设——服务端硬用规范 demo 坐标（demo_coords，与种子录制
+        # 逐字同源），忽略请求体 blueprint/inst/窗口，杜绝前端传错 → 离线命中种子回放。
+        if body.demo:
+            bp = _load_demo_blueprint(_dc.DEMO_ABLATION_BLUEPRINT_ID)
+            inst, bar = _dc.DEMO_INST, _dc.DEMO_BAR
+            start_ms, end_ms = _dc.DEMO_ABLATION_START_MS, _dc.DEMO_ABLATION_END_MS
+        else:
+            if body.blueprint is None or body.inst is None:
+                raise HTTPException(422, "blueprint and inst are required (or set demo=true)")
+            if body.bar not in _BARS:
+                raise HTTPException(422, f"bar must be one of {_BARS}")
+            try:
+                bp = loads_loom(json.dumps(body.blueprint))
+            except (ValueError, KeyError, TypeError) as exc:
+                raise HTTPException(422, f"bad loom: {exc}")
+            inst, bar = body.inst, body.bar
+            start_ms, end_ms = body.start_ms, body.end_ms
+        _guard_llm_blueprint(_compile_or_422(bp, bar))
         # 只跑蓝图实际支持的臂（无 committee → no_risk_officer 无对象；无 RAG →
         # no_rag 无对象）。arm_blueprint 对缺席目标抛 ValueError，此处预筛以给
         # 干净的 4xx（而非在 committee_ablation 里炸出 500）。
-        types = {n["type"] for n in body.blueprint.get("nodes", [])}
+        types = {n.type for n in bp.nodes}
         arms = [a for a in DEFAULT_ARMS
                 if a == "full"
                 or (a == "no_risk_officer" and "committee" in types)
@@ -465,8 +490,8 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         src = _eval_source()
         try:
             rep = committee_ablation(
-                bp, src, inst=body.inst, bar=body.bar, start_ms=body.start_ms,
-                end_ms=body.end_ms, llm=app.state.llm, arms=tuple(arms),
+                bp, src, inst=inst, bar=bar, start_ms=start_ms,
+                end_ms=end_ms, llm=app.state.llm, arms=tuple(arms),
                 initial_cash=body.initial_cash, fee_rate=body.fee_rate)
         except ReplayMissError as exc:
             raise HTTPException(
@@ -486,14 +511,40 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         evolve 内 ValueError 双保险）；LLM 种子蓝图非 offline → 409。变异算子用
         app.state.llm（须 offline 安全，否则每孩子变异烧真配额）。"""
         from alphaloom.evolve.lab import evolve
+        from alphaloom.eval import demo_coords as _dc
         from alphaloom.llm.recording import ReplayMissError
-        if body.bar not in _BARS:
-            raise HTTPException(422, f"bar must be one of {_BARS}")
-        try:
-            bp = loads_loom(json.dumps(body.blueprint))
-        except (ValueError, KeyError, TypeError) as exc:
-            raise HTTPException(422, f"bad loom: {exc}")
-        _guard_llm_blueprint(_compile_or_422(bp, body.bar))
+        # demo=True：离线 demo 预设——服务端硬用规范 demo 坐标（demo_coords，与种子录制
+        # 逐字同源），忽略请求体 blueprint/inst/窗口/规模，杜绝前端传错 → 命中种子回放。
+        if body.demo:
+            bp = _load_demo_blueprint(_dc.DEMO_EVOLVE_BLUEPRINT_ID)
+            inst, bar = _dc.DEMO_INST, _dc.DEMO_BAR
+            train_window, valid_window = _dc.DEMO_EVOLVE_TRAIN, _dc.DEMO_EVOLVE_VALID
+            population, generations = _dc.DEMO_EVOLVE_POPULATION, _dc.DEMO_EVOLVE_GENERATIONS
+            param_only = _dc.DEMO_EVOLVE_PARAM_ONLY
+            # 变异算子系统提示内嵌节点目录 —— demo 录制是对**内置节点目录**录的（seed
+            # 脚本只 import alphaloom.nodes，无自定义/无测试夹具节点）。运行期若多注册过
+            # 自定义（sandboxed）节点、或进程内混入测试夹具（category=="test"）节点，全局
+            # REGISTRY 目录字符串会变 → 变异请求 hash 变 → 种子录制 miss。demo 回放固定
+            # 用与录制同源的内置子集（排除 sandboxed 与 test 类），稳定命中。
+            evolve_defs = {t: d for t, d in REGISTRY.items()
+                           if not getattr(d, "sandboxed", False)
+                           and getattr(d, "category", None) != "test"}
+        else:
+            if body.blueprint is None or body.inst is None:
+                raise HTTPException(422, "blueprint and inst are required (or set demo=true)")
+            if body.bar not in _BARS:
+                raise HTTPException(422, f"bar must be one of {_BARS}")
+            try:
+                bp = loads_loom(json.dumps(body.blueprint))
+            except (ValueError, KeyError, TypeError) as exc:
+                raise HTTPException(422, f"bad loom: {exc}")
+            inst, bar = body.inst, body.bar
+            train_window = (body.train_start_ms, body.train_end_ms)
+            valid_window = (body.valid_start_ms, body.valid_end_ms)
+            population, generations = body.population, body.generations
+            param_only = body.param_only
+            evolve_defs = None    # 非 demo：用全局 REGISTRY（现状，含自定义节点）
+        _guard_llm_blueprint(_compile_or_422(bp, bar))
         # 变异算子本身也调 LLM——非 offline 客户端跑进化会烧真配额，一并守门。
         if not _llm_quota_safe():
             raise HTTPException(
@@ -503,12 +554,12 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
                      "calls or inject an offline client.")
         src = _eval_source()
         try:
-            g = evolve(bp, src, inst=body.inst, bar=body.bar,
-                       train_window=(body.train_start_ms, body.train_end_ms),
-                       valid_window=(body.valid_start_ms, body.valid_end_ms),
-                       llm=app.state.llm, population=body.population,
-                       generations=body.generations, param_only=body.param_only,
-                       initial_cash=body.initial_cash, fee_rate=body.fee_rate)
+            g = evolve(bp, src, inst=inst, bar=bar,
+                       train_window=train_window, valid_window=valid_window,
+                       llm=app.state.llm, population=population,
+                       generations=generations, param_only=param_only,
+                       initial_cash=body.initial_cash, fee_rate=body.fee_rate,
+                       defs=evolve_defs)
         except ReplayMissError as exc:
             raise HTTPException(
                 422, {"error": "replay_miss",
