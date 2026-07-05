@@ -11,7 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse
 import alphaloom.nodes  # noqa: F401
 from alphaloom.api.runs_store import RunsStore
 from alphaloom.api.schemas import (CompileIn, CopilotBlueprintIn, CopilotExplainIn,
-                                   CopilotOptimizeIn, CustomNodeIn, RunIn, SaveBlueprintIn)
+                                   CopilotOptimizeIn, CustomNodeIn, EvalAblationIn,
+                                   EvalFidelityIn, EvalLeaderboardIn, EvalScorecardIn,
+                                   EvolveIn, RunIn, SaveBlueprintIn)
 from alphaloom.api.serialize import sanitize
 from alphaloom.api.service import RunService
 from alphaloom.copilot import blueprint as copilot
@@ -268,6 +270,221 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             return copilot.optimize(body.blueprint, body.report, llm, defs=REGISTRY)
         except copilot.BlueprintGenerationError as exc:
             raise HTTPException(422, {"error": "generation_failed", "message": str(exc)})
+
+    # —— 评估 / 进化端点（D4-T6）——
+    #
+    # 同步执行（plain def → FastAPI 自动丢线程池，不阻塞事件循环，与既有 def 端点
+    # 同款）。数据量锁定小规模（离线 ≤400 bar 数秒级；消融 ≤3 臂、进化 pop≤4/gen≤3），
+    # 走 RunService 异步只会徒增复杂度；同步直接返回报告是本 demo 的正解。
+    #
+    # 配额守门（LLM 蓝图离线安全）：含 LLM 节点的蓝图（编译证书 llm_calls_per_bar>0）
+    # 会在每根 bar / 每臂 / 每孩子调 LLM——非 offline 客户端跑它就烧真配额。因此
+    # LLM 蓝图仅在 llm 客户端 offline（录制回放 / 本地剧本，零配额）时放行，否则 409。
+    # 纯确定性蓝图（llm_calls_per_bar==0）无此风险，无条件放行（连 llm=None 也照跑）。
+    def _compile_or_422(bp, bar):
+        r = compile_blueprint(bp, bars_per_day=86_400_000 // bar_to_ms(bar))
+        if not r.ok:
+            raise HTTPException(422, {"errors": [e.to_dict() for e in r.errors]})
+        return r
+
+    def _needs_llm(compiled) -> bool:
+        cert = getattr(compiled, "certificate", None)
+        return bool(cert is not None and getattr(cert, "llm_calls_per_bar", 0) > 0)
+
+    def _llm_quota_safe() -> bool:
+        """当前 llm 客户端是否零配额安全（offline 录制回放 / 本地剧本）。"""
+        return getattr(app.state.llm, "offline", False) is True
+
+    def _guard_llm_blueprint(compiled):
+        """LLM 蓝图须 offline 客户端；否则 409（不烧真配额，评估拒绝跑）。"""
+        if _needs_llm(compiled) and not _llm_quota_safe():
+            raise HTTPException(
+                409, "blueprint contains LLM node(s); evaluation refuses to run it "
+                     "against live quota. Provide recorded calls and set "
+                     "ALPHALOOM_OFFLINE=1 (offline replay), or inject an offline "
+                     "LLM client. Deterministic (non-LLM) blueprints run freely.")
+
+    def _eval_source():
+        from alphaloom.data.sqlite_source import SQLiteMarketData
+        return SQLiteMarketData(db_path)
+
+    @app.post("/api/eval/fidelity")
+    def eval_fidelity(body: EvalFidelityIn):
+        """保真度阶梯 L0-L3（回测测谎仪，零 LLM 配额）：从一个已完成 run 取
+        fills + 同窗 candles 在四档成交模型下重放。run 不存在 → 404、未完成 → 409。"""
+        from alphaloom.eval.fidelity import fidelity_ladder
+        row = store.get(body.run_id)
+        if row is None:
+            raise HTTPException(404, "run not found")
+        if row["status"] != "completed" or not row["report_json"]:
+            raise HTTPException(
+                409, f"run status is {row['status']!r}; fidelity ladder needs a "
+                     "completed run with a recorded fill sequence to replay")
+        report = json.loads(row["report_json"])
+        fills = report.get("fills", [])
+        params = json.loads(row["params_json"] or "{}")
+        inst = params.get("inst")
+        bar = params.get("bar", "1m")
+        src = _eval_source()
+        try:
+            candles = list(src.iter_candles(inst, bar, params.get("start_ms"),
+                                            params.get("end_ms")))
+        finally:
+            src.close()
+        ladder = fidelity_ladder(fills, candles, initial_cash=body.initial_cash,
+                                 fee_rate=body.fee_rate, slippage_bps=body.slippage_bps)
+        return sanitize(ladder.to_dict())
+
+    @app.post("/api/eval/scorecard")
+    def eval_scorecard(body: EvalScorecardIn):
+        """蓝图记分卡：把前端已算好的证据碎片（run 报告 / 保真度阶梯 / 消融）聚合成
+        权威综合分。**评分数学只在后端一份实现**（tanh 压缩 / 四权重 / 缺证据保守分），
+        前端绝不重实现以防与诚实评分口径漂移——故设此端点（纯数值零 LLM）。
+        train_report 缺失 → 422（scorecard 的唯一硬性输入）。"""
+        from alphaloom.eval.scorecard import scorecard
+        try:
+            card = scorecard(body.train_report, body.valid_report,
+                             ladder=body.ladder, cost_cert=body.cost_cert,
+                             ablation=body.ablation)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(422, str(exc))
+        return sanitize(card.to_dict())
+
+    @app.post("/api/eval/leaderboard")
+    def eval_leaderboard(body: EvalLeaderboardIn):
+        """基线排行榜：buy-hold / 默认参数 / 随机三基线 + 可选指定蓝图，同窗对比。
+        指定蓝图含 LLM 节点且非 offline → 409（守门）。基线纯确定性零 LLM。"""
+        from alphaloom.eval.leaderboard import (baseline_buy_hold,
+                                                baseline_ema_default,
+                                                baseline_random, leaderboard)
+        if body.bar not in _BARS:
+            raise HTTPException(422, f"bar must be one of {_BARS}")
+        has_valid = body.valid_start_ms is not None or body.valid_end_ms is not None
+        src = _eval_source()
+        try:
+            def _pair(fn_or_bp, *, is_bp=False, name=None, bp=None):
+                train = _run_eval_backtest(bp, src, body) if is_bp else fn_or_bp(
+                    src, body.inst, body.bar, body.start_ms, body.end_ms,
+                    initial_cash=body.initial_cash, fee_rate=body.fee_rate)
+                valid = None
+                if has_valid:
+                    valid = (_run_eval_backtest(bp, src, body, valid=True) if is_bp
+                             else fn_or_bp(src, body.inst, body.bar,
+                                           body.valid_start_ms, body.valid_end_ms,
+                                           initial_cash=body.initial_cash,
+                                           fee_rate=body.fee_rate))
+                return {"name": name, "kind": "baseline" if not is_bp else "blueprint",
+                        "train_report": train, "valid_report": valid}
+
+            entries = [
+                _pair(baseline_buy_hold, name="baseline_buy_hold"),
+                _pair(baseline_ema_default, name="baseline_ema_default"),
+                _pair(baseline_random, name="baseline_random"),
+            ]
+            if body.blueprint is not None:
+                try:
+                    bp = loads_loom(json.dumps(body.blueprint))
+                except (ValueError, KeyError, TypeError) as exc:
+                    raise HTTPException(422, f"bad loom: {exc}")
+                _guard_llm_blueprint(_compile_or_422(bp, body.bar))
+                entries.append(_pair(None, is_bp=True, name=body.blueprint_name, bp=bp))
+            board = leaderboard(entries)
+        finally:
+            src.close()
+        return sanitize(board.to_dict())
+
+    def _run_eval_backtest(bp, src, body, *, valid=False):
+        from alphaloom.backtest.runner import run_backtest
+        start = body.valid_start_ms if valid else body.start_ms
+        end = body.valid_end_ms if valid else body.end_ms
+        return run_backtest(bp, src, inst=body.inst, bar=body.bar,
+                            start_ms=start, end_ms=end,
+                            initial_cash=body.initial_cash, fee_rate=body.fee_rate,
+                            llm=app.state.llm)
+
+    @app.post("/api/eval/ablation")
+    def eval_ablation(body: EvalAblationIn):
+        """委员会消融三臂（护栏价值量化）：full / no_risk_officer / no_rag。含 LLM
+        节点必然为真（committee）——须 offline 客户端（否则 409）。offline 空录制
+        库的 ReplayMissError → 干净 422（带解释），不是 500 栈。"""
+        from alphaloom.eval.ablation import DEFAULT_ARMS, committee_ablation
+        from alphaloom.llm.recording import ReplayMissError
+        if body.bar not in _BARS:
+            raise HTTPException(422, f"bar must be one of {_BARS}")
+        try:
+            bp = loads_loom(json.dumps(body.blueprint))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(422, f"bad loom: {exc}")
+        _guard_llm_blueprint(_compile_or_422(bp, body.bar))
+        # 只跑蓝图实际支持的臂（无 committee → no_risk_officer 无对象；无 RAG →
+        # no_rag 无对象）。arm_blueprint 对缺席目标抛 ValueError，此处预筛以给
+        # 干净的 4xx（而非在 committee_ablation 里炸出 500）。
+        types = {n["type"] for n in body.blueprint.get("nodes", [])}
+        arms = [a for a in DEFAULT_ARMS
+                if a == "full"
+                or (a == "no_risk_officer" and "committee" in types)
+                or (a == "no_rag" and "require_citations" in types)]
+        if "no_risk_officer" not in arms:
+            raise HTTPException(
+                422, "blueprint has no committee node to ablate; the ablation "
+                     "study needs a committee (soft-guardrail) to remove")
+        src = _eval_source()
+        try:
+            rep = committee_ablation(
+                bp, src, inst=body.inst, bar=body.bar, start_ms=body.start_ms,
+                end_ms=body.end_ms, llm=app.state.llm, arms=tuple(arms),
+                initial_cash=body.initial_cash, fee_rate=body.fee_rate)
+        except ReplayMissError as exc:
+            raise HTTPException(
+                422, {"error": "replay_miss",
+                      "message": f"offline replay miss: {exc}. Ablation arms have no "
+                                 "recorded LLM calls yet (recording is a later task); "
+                                 "re-run in record mode to capture them."})
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        finally:
+            src.close()
+        return sanitize(rep.to_dict())
+
+    @app.post("/api/evolve")
+    def evolve_ep(body: EvolveIn):
+        """进化实验室：LLM 变异算子 + 编译守门 + 谱系树。规模超限 → 422（pydantic +
+        evolve 内 ValueError 双保险）；LLM 种子蓝图非 offline → 409。变异算子用
+        app.state.llm（须 offline 安全，否则每孩子变异烧真配额）。"""
+        from alphaloom.evolve.lab import evolve
+        from alphaloom.llm.recording import ReplayMissError
+        if body.bar not in _BARS:
+            raise HTTPException(422, f"bar must be one of {_BARS}")
+        try:
+            bp = loads_loom(json.dumps(body.blueprint))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(422, f"bad loom: {exc}")
+        _guard_llm_blueprint(_compile_or_422(bp, body.bar))
+        # 变异算子本身也调 LLM——非 offline 客户端跑进化会烧真配额，一并守门。
+        if not _llm_quota_safe():
+            raise HTTPException(
+                409, "evolution runs the LLM mutation operator every child; it "
+                     "requires an offline LLM client (recorded replay / local "
+                     "script, zero quota). Set ALPHALOOM_OFFLINE=1 with recorded "
+                     "calls or inject an offline client.")
+        src = _eval_source()
+        try:
+            g = evolve(bp, src, inst=body.inst, bar=body.bar,
+                       train_window=(body.train_start_ms, body.train_end_ms),
+                       valid_window=(body.valid_start_ms, body.valid_end_ms),
+                       llm=app.state.llm, population=body.population,
+                       generations=body.generations, param_only=body.param_only,
+                       initial_cash=body.initial_cash, fee_rate=body.fee_rate)
+        except ReplayMissError as exc:
+            raise HTTPException(
+                422, {"error": "replay_miss",
+                      "message": f"offline replay miss: {exc}. Re-run in record "
+                                 "mode to capture the mutation-operator calls."})
+        except ValueError as exc:                 # 规模超限 / 窗口重叠 → 422
+            raise HTTPException(422, str(exc))
+        finally:
+            src.close()
+        return sanitize(g.to_dict())
 
     # —— Text-to-Node 沙箱注册（AST 白名单，热注册进全局 REGISTRY）——
     # 命名空间假设（单用户，D4 Carryover）：REGISTRY 是进程级全局，注册的自定义

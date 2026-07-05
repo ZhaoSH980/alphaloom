@@ -66,6 +66,15 @@
 
 **REST/前端新增**：`POST /api/eval/fidelity`、`/api/eval/ablation`、`/api/evolve`；前端 Runs&Eval 区（保真度阶梯图、记分卡、排行榜、消融表、进化谱系树 React Flow）。
 
+> **D4-T6 实施注记（sanctioned deviations，控制器 T6 任务书已核准）**：
+> 1. **端点集扩为 5 个**（非契约字面 3 个）：`/api/eval/fidelity`、`/api/eval/leaderboard`、`/api/eval/ablation`、`/api/eval/scorecard`、`/api/evolve`。**scorecard 判断**：加端点而非纯前端算——综合分数学（tanh 压缩 / 四权重 / 缺证据保守分 / 零交易零证据）是**载荷型诚实评分逻辑，必须唯一实现**在后端，前端重实现会与 Python 源真相漂移（违背 D3-T11 诚实性教训）；端点接前端已算好的证据碎片（run 报告 + 阶梯 + 消融）→ 权威 `Scorecard.to_dict()`，纯数值零 LLM。
+> 2. **同步执行**（plain `def` 端点 → FastAPI 自动丢线程池，与既有 `def` 端点同款，不阻塞事件循环）：数据量锁定小规模（离线 ≤400 bar 数秒级、消融 ≤3 臂、进化 pop≤4/gen≤3），走 RunService 异步只增复杂度无收益；同步直接返回报告是本 demo 的正解。source 每请求开/关（`try/finally`）。
+> 3. **LLM 配额守门设计**：含 LLM 节点的蓝图（编译证书 `llm_calls_per_bar>0`）非 offline 客户端跑它会烧真配额（每 bar/每臂/每孩子调 LLM）。守门规则——LLM 蓝图仅当 `getattr(app.state.llm, "offline", False) is True`（录制回放 / 本地剧本，零配额）时放行，否则 **409**；进化端点额外守变异算子本身（每孩子调 LLM）；纯确定性蓝图（`llm_calls_per_bar==0`）无条件放行（连 `llm=None` 也照跑，基线/ema_cross 零 LLM）。测试注入的 scripted fake LLM 标 `offline=True`（本地剧本 = 真零配额 = 视同 offline 安全），`LiveLikeLLM`（`offline=False`）用于自证守门真拦住（其 `chat` 被调即 AssertionError）。
+> 4. **消融臂预筛**：端点只跑蓝图实际支持的臂（无 committee → 无 no_risk_officer 对象 → 422；无 require_citations → 静默跳过 no_rag，只跑 full+no_risk_officer，`guardrail_value` 照算）。`arm_blueprint` 对缺席目标抛 ValueError → 干净 422（非 500）。
+> 5. **ReplayMissError 干净 4xx**：offline 客户端 + 空录制库（消融/进化臂的 LLM 调用未录，T8 才录）→ `ReplayMissError` 捕获转 **422**（带"re-run in record mode"解释），不是 500 栈。消融 offline 真实回放留 T8 录完才通，端点+测试先用注入 fake 走通。
+> 6. **规模超限 422 双保险**：pydantic 层 `population∈[1,4]`/`generations∈[1,3]`（`EvolveIn` Field 约束）先挡，evolve 内 ValueError（含窗口重叠）转 422 兜底。窗口边界沿用 RunIn 的 int64 溢出防护（`le=4_102_444_800_000`）。
+> 7. **T5 审查遗留必修（本任务内做）**：`evolve/lab.py` 孩子回测的运行期错误收容——变异 param 类型垃圾（如 `period="very fast"`）编译过（int 只是声明类型不校验值）但在 `create_instance/setup` 的 `int()` 处 ValueError，此前未捕获炸掉整棵谱系（API 暴露后网络可达 DoS）。修为：孩子回测包 `try/except`，炸了记 `compile_status="runtime_error"`（新增枚举值）、`fitness=None`、错误摘要入新增 `GenealogyNode.error` 字段、不进种群、**进化继续**；**seed 跑炸仍 raise**（种子坏是调用方错误）。`to_dict` 增 `error` 字段，React Flow 形状注意 `runtime_error` 新枚举。
+
 **发布准备（不含公开推送）**：README banner/截图/GIF、docs/evaluation-methodology.md（统计局限诚实框定）、docs/demo-script.md（10 分钟 talk track）、docs/future-work.md、LICENSE 已有、CI workflow（pytest+前端构建）。**GitHub 公开推送留给用户一键执行**（不可逆对外发布）。
 
 ---

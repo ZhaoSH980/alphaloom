@@ -344,6 +344,76 @@ def test_non_json_reply_consumes_retry_then_repairs(fake_backtest):
 
 
 # =========================================================================== #
+# 运行期错误收容（T5 审查遗留必修）：变异 param 类型垃圾（如 period="very fast"）
+# 编译过（int 只是声明类型不校验值），但在 create_instance/setup 的 int() 处抛
+# ValueError。此前未捕获会炸掉整棵谱系；修为：该孩子记 compile_status=
+# "runtime_error"、fitness=None、错误消息摘要入谱系，进化继续（不中断）。
+# =========================================================================== #
+def test_garbage_param_mutation_is_runtime_error_not_lineage_crash(tmp_path):
+    """垃圾 param 变异（period="very fast"）→ 编译过、回测 setup 处 ValueError
+    → runtime_error 节点（非 stillborn，非崩溃）；同代健康孩子照常存活、进化续。
+
+    用真 run_backtest（崩点在 create_instance/setup，fake 回测测不出），唯一
+    LLM 是变异算子剧本（零配额，剧本精确耗尽自证）。"""
+    db = SQLiteMarketData(tmp_path / "market.sqlite")
+    db.insert_candles("BTC-USDT-SWAP", "1m",
+                      gen_candles(120, seed=3, trend=0.002))
+    train_w, valid_w = (0, 59 * 60_000), (60 * 60_000, None)
+    llm = ScriptedMutationLLM([
+        # g1_c0（父=seed）：垃圾 param——编译过但 setup 处 int("very fast") ValueError
+        {"summary": "make the ema very fast",
+         "set_params": {"ema_fast": {"period": "very fast"}}},
+        # g1_c1（父=seed）：健康 param 变异——正常跑通，撑起进化不中断
+        {"summary": "widen the ema", "set_params": {"ema_fast": {"period": 20}}},
+    ])
+    g = evolve(_seed(), db, inst="BTC-USDT-SWAP", bar="1m",
+               train_window=train_w, valid_window=valid_w, llm=llm,
+               population=2, generations=1, mutations_per_gen=2)
+
+    assert llm.calls == 2 and not llm.script      # 剧本精确耗尽 = 零配额自证
+    by_id = {n.id: n for n in g.nodes}
+
+    # 垃圾孩子：runtime_error，无适应度，蓝图 JSON 如实记录（编译过了才跑炸），
+    # 错误消息摘要入谱系（含 node/param 线索或 ValueError 文本）
+    bad = by_id["g1_c0"]
+    assert bad.compile_status == "runtime_error"
+    assert bad.fitness is None
+    assert bad.blueprint_json is not None         # 编译成功过——蓝图如实留档
+    assert bad.error and isinstance(bad.error, str) and bad.error.strip()
+    assert bad.survived is False                  # runtime_error 不进种群
+
+    # 健康孩子照常存活；进化没被垃圾孩子中断
+    good = by_id["g1_c1"]
+    assert good.compile_status == "ok"
+    assert isinstance(good.fitness, float)
+
+    # 终局有存活者、winner 从健康个体里选出（不是崩溃、不是 seed 独苗因异常退化）
+    assert any(n.survived for n in g.nodes)
+    assert g.winner["id"] in {n.id for n in g.nodes if n.survived}
+
+    d = g.to_dict()
+    json.dumps(d)                                 # JSON 安全（含新 error 字段）
+    bad_d = next(nd for nd in d["nodes"] if nd["id"] == "g1_c0")
+    assert bad_d["compile_status"] == "runtime_error"
+    assert bad_d["error"]
+
+
+def test_seed_runtime_crash_still_raises(tmp_path):
+    """种子蓝图跑炸仍应 raise——种子坏是调用方错误，不是变异风险；不该被静默
+    收容成 runtime_error 节点。"""
+    db = SQLiteMarketData(tmp_path / "market.sqlite")
+    db.insert_candles("BTC-USDT-SWAP", "1m",
+                      gen_candles(60, seed=4, trend=0.001))
+    seed = apply_patch(_seed(), {"set_params": {"ema_fast": {"period": "garbage"}}})
+    train_w, valid_w = (0, 29 * 60_000), (30 * 60_000, None)
+    with pytest.raises(ValueError):
+        evolve(seed, db, inst="BTC-USDT-SWAP", bar="1m",
+               train_window=train_w, valid_window=valid_w,
+               llm=ScriptedMutationLLM([]), population=1, generations=1,
+               mutations_per_gen=1)
+
+
+# =========================================================================== #
 # param_only 降级保险丝：结构变异被拒喂回，param 变异照常；产物图结构与种子一致
 # =========================================================================== #
 def test_param_only_mode_rejects_structural_and_still_evolves(fake_backtest):

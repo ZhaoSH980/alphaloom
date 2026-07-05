@@ -8,7 +8,11 @@
    （深拷贝，绝不污染父代）→ **编译守门**：编译失败把 CompileError.fix_hint
    喂回 LLM 重试 ≤ :data:`MAX_REPAIR_RETRIES` 次（复用 copilot text_to_blueprint
    的自修复模式）；仍失败则该变异**废弃并如实记录 stillborn** 进谱系树。
-   编译过的孩子跑 train 窗回测 → 适应度。
+   编译过的孩子跑 train 窗回测 → 适应度。**回测执行期若炸**（编译不校验 param
+   值——如 ``period="very fast"`` 编译过但 setup 的 ``int()`` 崩），该孩子记
+   ``runtime_error``（错误摘要入谱系）、不进种群，**进化继续**——一个变异垃圾
+   绝不炸掉整棵谱系（API 暴露后这是网络可达的 DoS 面，收容是硬性）。
+   **种子蓝图跑炸仍 raise**：种子坏是调用方错误不是变异风险，不静默收容。
 3. **选择**：存活个体 + 本代合法孩子按适应度排序，top-N 进下代（N=population，
    精英保留——父代不自动死亡，被更强的孩子挤出去才死）。
 4. **终选**：最后一代最优个体跑 **valid 窗**（从未参与进化的数据）→ 最终成绩 +
@@ -203,10 +207,14 @@ class GenealogyNode:
     gen: int
     parent_id: str | None
     mutation_summary: str          # LLM 的变异一句话描述（seed 为 "seed blueprint"）
-    fitness: float | None          # train 窗适应度；stillborn = None（从未跑过回测）
-    compile_status: str            # "ok" | "repaired"（≥1 轮反馈后过编译）| "stillborn"
-    blueprint_json: dict | None    # loom dict（stillborn 记录最后一次尝试的产物，可能 None）
+    fitness: float | None          # train 窗适应度；stillborn/runtime_error = None（无有效回测）
+    # "ok" | "repaired"（≥1 轮反馈后过编译）| "stillborn"（编译守门未过）
+    # | "runtime_error"（编译过、但回测执行期炸了——如垃圾 param 在 setup 处 int() 崩）
+    compile_status: str
+    blueprint_json: dict | None    # loom dict（stillborn 记最后一次尝试产物，可能 None；
+                                   # runtime_error 恒有——编译成功过才可能运行期炸）
     survived: bool = False         # 是否活到终局（最后一代选择后的存活集）
+    error: str | None = None       # runtime_error 的错误消息摘要（其余状态为 None）
 
     def to_dict(self) -> dict:
         return _json_safe({
@@ -214,6 +222,7 @@ class GenealogyNode:
             "mutation_summary": self.mutation_summary, "fitness": self.fitness,
             "compile_status": self.compile_status,
             "blueprint_json": self.blueprint_json, "survived": self.survived,
+            "error": self.error,
         })
 
 
@@ -436,7 +445,17 @@ def evolve(seed_blueprint: BlueprintSpec, source, *, inst: str, bar: str,
             genealogy_nodes.append(child_node)
             if child_bp is None:
                 continue                      # stillborn：只入谱系，不进种群
-            report = _run_train(child_bp)
+            # 运行期错误收容（T5 审查遗留）：孩子已过编译守门，但回测执行期仍可能
+            # 炸（垃圾 param 类型编译不校验值——如 period="very fast" 在 setup 的
+            # int() 处 ValueError）。捕获后记 runtime_error、如实留错误摘要，进化
+            # 继续（不让一个变异垃圾炸掉整棵谱系；网络可达后这就是 DoS 面）。
+            try:
+                report = _run_train(child_bp)
+            except Exception as exc:          # noqa: BLE001 —— 变异沙盒的执行期兜底
+                child_node.compile_status = "runtime_error"
+                child_node.fitness = None
+                child_node.error = f"{type(exc).__name__}: {exc}"[:500]
+                continue                      # runtime_error：入谱系，不进种群
             child_node.fitness = fitness_of(report.summary)
             children.append(_Individual(node=child_node, bp=child_bp,
                                         summary=dict(report.summary)))
