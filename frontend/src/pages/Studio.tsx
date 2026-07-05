@@ -43,6 +43,18 @@ export default function Studio() {
   const currentLoom = useCallback(() =>
     flowToLoom(nodes as never, edges as never, base), [nodes, edges, base]);
 
+  // 结构签名：只含影响编译的字段（不含瞬态 blocked/active），做编译 effect 的闸门。
+  const structuralKey = useMemo(
+    () => JSON.stringify({
+      n: nodes.map((n) => ({ id: n.id, t: (n.data as { def: { type: string } }).def.type,
+                             p: (n.data as { params: unknown }).params,
+                             x: Math.round(n.position.x), y: Math.round(n.position.y) })),
+      e: edges.map((e) => ({ s: e.source, sh: e.sourceHandle, t: e.target, th: e.targetHandle,
+                             f: !!(e.data as { feedback?: boolean } | undefined)?.feedback })),
+    }),
+    [nodes, edges],
+  );
+
   // 500ms 防抖编译
   useEffect(() => {
     if (!nodes.length) { setErrors([]); setCert(null); return; }
@@ -56,7 +68,7 @@ export default function Studio() {
       }).catch(() => {});
     }, 500);
     return () => clearTimeout(h);
-  }, [nodes.length, edges, currentLoom, setNodes]);
+  }, [structuralKey, currentLoom, setNodes]);
 
   const load = async (id: string) => {
     if (nodes.length && !confirm("覆盖当前画布?")) return;
