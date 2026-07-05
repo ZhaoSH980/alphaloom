@@ -280,5 +280,5 @@ nodes/llm_nodes.py：LLMAnalystNode（type=llm_analyst, category=decision, input
 1. 委员会消融/进化实验室/保真度阶梯/记分卡是 D4；D3 只交付单蓝图的 LLM 决策+反思。
 2. 录制库 llm_calls.sqlite 入库供离线演示——**Task 11 硬前置：.gitignore 现有 `data/*.sqlite` 会挡住它，必须加 `!data/llm_calls.sqlite` 例外否则离线回放全 miss**（T1 审查实测 git check-ignore 确认被挡）；注意体积（种子控制在少量演示运行）；真实 key 演示前用户自填 .env。
 3. 沙箱 AST 白名单是最小可用版；D4 若开放用户自定义节点市场需加资源限额（CPU/内存/超时）。
-5. `_extract_json` 字符级平衡扫描不识别 JSON 字符串值内的孤立花括号（fail-safe 回退 hold，被 system prompt "No prose outside JSON" 覆盖）——T3 Committee 也复用它，若 D3 内想硬化改 `json.JSONDecoder().raw_decode()` 从 `{` 逐位尝试。
 4. 强制引用（citations 非空才允许交易）在 D3 是软约定+测试；D4 可升级为编译期类型（RAG 盖章类型，类比 RiskStampedSignal）。
+5. `_extract_json` 字符级平衡扫描不识别 JSON 字符串值内的孤立花括号（fail-safe 回退 hold，被 system prompt "No prose outside JSON" 覆盖）——T2/T3 复用它，若想硬化改 `json.JSONDecoder().raw_decode()` 从 `{` 逐位尝试（D4）。
