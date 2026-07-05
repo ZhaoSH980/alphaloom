@@ -15,6 +15,7 @@ def create_default_app():
     return create_app(db_path=data / "demo.sqlite", runs_db=data / "runs.sqlite",
                       record_dir=runs_dir, blueprints_dir=REPO / "blueprints",
                       user_blueprints_dir=REPO / "blueprints" / "user",
-                      frontend_dist=REPO / "frontend" / "dist")
+                      frontend_dist=REPO / "frontend" / "dist",
+                      llm_db=data / "llm_calls.sqlite")
 
 app = create_default_app()
