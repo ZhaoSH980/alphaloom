@@ -35,12 +35,22 @@ composite = Σ weight_i * component_i，四个分项各 0-100：
 
 **缺证据 = 低证据分，不是满分**：MISSING_EVIDENCE_SCORE=25——缺失维度按
 "弱证据"计而非中性 50 或满分，且 evidence_coverage 字段如实标注缺了什么。
-设计上限：无验证窗的记分卡 composite 封顶约 50 出头——没有样本外证据的策略
-不配站上排行榜上半区。
+设计上限：无验证窗（但有交易）的记分卡 composite 封顶 61.25（ladder/cert 均
+满分时：0.4×50 + 0.25×25 + 0.2×100 + 0.15×100）——验证窗维度至多贡献
+20/40，样本外证据缺席时排序键被显著压低。
 
-可批判点（如实列出）：tanh 压缩尺度（10% 收益 ≈ 76 分）是主观锚点；四权重
-是设计决策不是统计推断；fidelity 的尺度下限使小额 pnl 策略的衰减惩罚偏宽松。
-全部常量集中在模块顶部，欢迎批判与重调。
+**零交易 = 零证据**：排序窗（valid 优先，否则 train）num_trades==0 时，
+valid_performance / generalization / fidelity 三项一律按 MISSING_EVIDENCE_SCORE
+计——没交易就没东西可过拟合、没东西可在真实成交假设下衰减，这些维度的
+"满分"是空洞的（审查实测：躺平策略曾靠这 0.60 权重的空洞满分拿 80 分、压过
+78.33 的真实盈利者）。determinism 保留——那是编译期属性，不依赖交易。
+躺平 + 全证据 composite ≈ 36.25，低于任何有真实交易证据的盈利策略。
+
+可批判点（如实列出）：tanh 压缩尺度是主观锚点（+10% 收益 ≈ 88 分，因
+tanh(1)≈0.76 → 50×1.76）；四权重是设计决策不是统计推断；fidelity 的尺度下限
+使小额 pnl 策略的衰减惩罚偏宽松；"零交易按零证据计"会误伤"极低频但真有信号"
+的策略在短验证窗上的得分（0 笔交易与故意躺平不可区分）——这是把"不可证伪"
+定价为弱证据的自觉取舍。全部常量集中在模块顶部，欢迎批判与重调。
 """
 from __future__ import annotations
 import math
@@ -57,7 +67,7 @@ WEIGHTS = {
 }
 MISSING_EVIDENCE_SCORE = 25.0    # 缺证据维度的保守分（弱证据 ≠ 中性 50 ≠ 满分）
 NO_VALID_DISCOUNT = 0.5          # 缺 valid 时样本内表现的折价系数
-RETURN_SQUASH_SCALE_PCT = 10.0   # tanh 压缩尺度：+10% 收益 ≈ 76 分
+RETURN_SQUASH_SCALE_PCT = 10.0   # tanh 压缩尺度：+10% 收益 ≈ 88 分（tanh(1)≈0.76）
 GAP_PENALTY_PER_PCT = 10.0       # 泛化差距每 1 个百分点扣 10 分
 FIDELITY_SCALE_FLOOR_FRAC = 0.01  # 保真度参照尺度下限 = 1% 初始资金（防零除）
 
@@ -221,12 +231,22 @@ def scorecard(train_report, valid_report=None, *, ladder=None,
         gap = round(float(train.get("return_pct", 0.0))
                     - float(valid.get("return_pct", 0.0)), 6)
 
+    # 零交易 = 零证据（设计理由见模块 docstring）：排序窗（valid 优先）没有一笔
+    # 完整交易时，表现/泛化/保真度三个交易依赖维度全按缺证据计——没交易就没
+    # 东西可过拟合、没东西可衰减，这些维度的"满分"是空洞的。determinism 保留
+    # （编译期属性，不依赖交易）。
+    ranked = valid if valid is not None else train
+    has_trades = float(ranked.get("num_trades", 0) or 0) > 0
+
     components = {
         "valid_performance": round(_score_valid_performance(train, valid), 4),
         "generalization": round(_score_generalization(gap), 4),
         "fidelity": round(_score_fidelity(ladder_d, init_eq), 4),
         "determinism": round(_score_determinism(cert), 4),
     }
+    if not has_trades:
+        for k in ("valid_performance", "generalization", "fidelity"):
+            components[k] = MISSING_EVIDENCE_SCORE
     composite = sum(WEIGHTS[k] * components[k] for k in WEIGHTS)
     composite = round(min(100.0, max(0.0, composite)), 2)
 
@@ -235,11 +255,16 @@ def scorecard(train_report, valid_report=None, *, ladder=None,
         "fidelity_ladder": ladder_d is not None,
         "cost_certificate": cert is not None,
         "ablation": ablation is not None,
+        "trading_activity": has_trades,
     }
     coverage = dict(coverage_flags)
     coverage["ratio"] = round(sum(coverage_flags.values()) / len(coverage_flags), 4)
 
     notes = []
+    if not has_trades:
+        notes.append("zero trades in ranking window: performance/generalization/"
+                     "fidelity treated as missing evidence (nothing traded = "
+                     "nothing proven); determinism kept (compile-time property)")
     if valid is None:
         notes.append("no validation window: performance is in-sample only "
                      "(discounted), generalization unverifiable")

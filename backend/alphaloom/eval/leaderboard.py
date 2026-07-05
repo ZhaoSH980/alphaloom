@@ -109,8 +109,11 @@ def baseline_buy_hold(source: DataSource, inst: str, bar: str,
     sell_fee = qty * last_px * fee_rate
     final_cash = cash + qty * last_px - sell_fee
     trip = (last_px - open0) * qty - buy_fee - sell_fee
+    # 结算腿 ts = 末 bar ts + bar_ms：与 runner / baseline_random 的 eod_close
+    # 语义统一（数据外合成结算时刻），防下游按 ts 对齐时误当末 bar 内成交。
     fills = [_fill(candles[0]["ts"], "buy", qty, open0, buy_fee, "bh_entry"),
-             _fill(candles[-1]["ts"], "sell", qty, last_px, sell_fee, "eod_close")]
+             _fill(int(candles[-1]["ts"]) + bar_to_ms(bar), "sell", qty,
+                   last_px, sell_fee, "eod_close")]
 
     return BacktestReport(
         run_id=f"bh-{uuid.uuid4().hex[:8]}", blueprint_id="baseline_buy_hold",

@@ -142,6 +142,54 @@ def test_determinism_ratio_rewarded():
 
 
 # ---------------------------------------------------------------------------
+# 零交易 = 零证据（审查实锤回归）：躺平策略不得靠"空洞满分"压过真实盈利者
+# ---------------------------------------------------------------------------
+def test_zero_trade_full_evidence_scores_as_missing_evidence():
+    # 回归背景：0 交易 + 全证据曾拿 80.0——generalization/fidelity 在"没东西可
+    # 过拟合/没东西可衰减"上白拿满分（合计 0.60 权重），压过真实盈利者。
+    flat = scorecard(_report(0.0, num_trades=0), _report(0.0, num_trades=0),
+                     ladder=_ladder(0.0, 0.0, 0.0, 0.0), cost_cert=CERT)
+    # 排序窗 num_trades==0 → 三个交易依赖维度全按缺证据计
+    assert flat.components["valid_performance"] == MISSING_EVIDENCE_SCORE
+    assert flat.components["generalization"] == MISSING_EVIDENCE_SCORE
+    assert flat.components["fidelity"] == MISSING_EVIDENCE_SCORE
+    assert flat.components["determinism"] == 100.0   # 编译期属性，不依赖交易，保留
+    assert math.isclose(flat.composite, 36.25, abs_tol=0.01), flat.composite
+    assert flat.evidence_coverage["trading_activity"] is False
+    assert any("zero trades" in n for n in flat.notes)
+
+
+def test_zero_trade_loses_to_real_earners():
+    # 对照组（审查者案例）：+3% 验证窗 / gap 3 / 零衰减阶梯的真实盈利者，
+    # 全确定（78.33）与零确定（63.33）都必须压过躺平（36.25）。
+    flat = scorecard(_report(0.0, num_trades=0), _report(0.0, num_trades=0),
+                     ladder=_ladder(0.0, 0.0, 0.0, 0.0), cost_cert=CERT)
+    earner_det = scorecard(_report(6.0), _report(3.0),
+                           ladder=_ladder(300.0, 300.0, 300.0, 300.0),
+                           cost_cert=CERT)
+    earner_llm = scorecard(_report(6.0), _report(3.0),
+                           ladder=_ladder(300.0, 300.0, 300.0, 300.0),
+                           cost_cert={**CERT, "deterministic_ratio": 0.0})
+    assert math.isclose(earner_det.composite, 78.33, abs_tol=0.01), earner_det.composite
+    assert math.isclose(earner_llm.composite, 63.33, abs_tol=0.01), earner_llm.composite
+    assert flat.composite < earner_llm.composite < earner_det.composite
+
+
+def test_trading_activity_flag_true_when_trades_exist():
+    card = scorecard(_report(10.0), _report(9.0), cost_cert=CERT)
+    assert card.evidence_coverage["trading_activity"] is True
+
+
+def test_zero_trade_rule_uses_ranking_window():
+    # 排序窗 = valid（有 valid 时）：train 有交易但 valid 零交易 → 仍按零证据计
+    card = scorecard(_report(10.0, num_trades=8), _report(0.0, num_trades=0),
+                     cost_cert=CERT)
+    assert card.evidence_coverage["trading_activity"] is False
+    assert card.components["valid_performance"] == MISSING_EVIDENCE_SCORE
+    assert card.components["generalization"] == MISSING_EVIDENCE_SCORE
+
+
+# ---------------------------------------------------------------------------
 # 消融占位：ablation dict 原样嵌入（T4 产出后接上）
 # ---------------------------------------------------------------------------
 def test_ablation_embedded_as_is():

@@ -79,7 +79,8 @@ def test_buy_hold_hand_calc_with_fee_matches_paperbroker_semantics():
     buy, sell = rep.fills
     assert buy["side"] == "buy" and buy["ts"] == 0
     assert math.isclose(buy["fee"], buy_fee, abs_tol=1e-9)
-    assert sell["side"] == "sell" and sell["ts"] == 120_000
+    # 结算腿 ts = 末 bar ts + bar_ms（对齐 runner/baseline_random 的 eod_close 语义）
+    assert sell["side"] == "sell" and sell["ts"] == 180_000
     assert math.isclose(sell["fee"], sell_fee, abs_tol=1e-9)
     assert math.isclose(sell["price"], 120.0, abs_tol=1e-9)   # 末 bar 收盘价
 
