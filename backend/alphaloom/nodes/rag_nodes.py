@@ -64,7 +64,7 @@ def _format_citation(hit) -> str:
 @node(
     type="require_citations",
     category="rag",
-    inputs={"signal": PinType.SIGNAL},
+    inputs={"signal": PinType.SIGNAL, "citations": PinType.SERIES},
     outputs={"signal": PinType.SIGNAL},
     cost=CostAnnotation(
         llm_calls_per_bar=0,
@@ -76,6 +76,9 @@ def _format_citation(hit) -> str:
 class RequireCitationsNode:
     """强制引用软约定门控：交易信号（long/short）必须携带非空 citations 才放行。
 
+    ``citations`` 输入 pin 可选（画布连 ``knowledge_retrieve.citations`` 即组合成
+    检索背书门——正向放行的可达路径）：pin 非 None 时合流进 ``sig["citations"]``
+    再判门；pin 悬空（未连接 → None）时退回只看 signal 自带 citations。
     citations 空的 long/short → 降级 hold（未经知识库背书的交易不允许）。
     hold/flat 本就不交易 → 不受约束，原样透传。这是 D3 软约定 + 测试锁的形态；
     D4 可升级为编译期 RAG 盖章类型（见 D3 Carryover 4）。
@@ -86,6 +89,12 @@ class RequireCitationsNode:
 
     def on_bar(self, ctx, inputs):
         sig = dict(inputs["signal"])
+        cites_in = inputs.get("citations")
+        if cites_in is not None:
+            # 画布接进来的检索结果：合并进 signal 自带 citations（双方溯源都保留）
+            pin_cites = (list(cites_in) if isinstance(cites_in, (list, tuple))
+                         else [cites_in])
+            sig["citations"] = list(sig.get("citations") or []) + pin_cites
         side = sig.get("side")
         citations = sig.get("citations") or []
         if side in ("long", "short") and not citations:

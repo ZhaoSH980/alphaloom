@@ -22,15 +22,24 @@ _K1 = 1.5
 _B = 0.75
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_CJK_RE = re.compile(r"[一-鿿]+")   # CJK 统一表意文字基本区 U+4E00-U+9FFF
 
 
 def _tokenize(text: str) -> list[str]:
-    """小写化 + 提取字母数字 token（ASCII 词干）。
+    """小写化 + 英文字母数字 token + CJK 相邻 2-gram。
 
-    自撰语料是中英对照，英文查询走英文分词即可命中；中文 CJK 字符不产生 ASCII token，
-    不影响英文检索路径。面试演示查询均为英文（martingale/grid/Al Brooks 等）。
+    语料中英对照：英文走 ``[a-z0-9]+`` 分词；中文无空格分词，CJK 字符连串按相邻
+    2-gram 切分（"马丁格尔" → 马丁/丁格/格尔），单字连串保留单字。查询与文档共用
+    同一分词规则，中文查询（如"马丁格尔 爆仓"）即可命中语料的中文段落。
     """
-    return _TOKEN_RE.findall(text.lower())
+    lower = text.lower()
+    toks = _TOKEN_RE.findall(lower)
+    for run in _CJK_RE.findall(lower):
+        if len(run) == 1:
+            toks.append(run)
+        else:
+            toks.extend(run[i:i + 2] for i in range(len(run) - 1))
+    return toks
 
 
 @dataclass(frozen=True)

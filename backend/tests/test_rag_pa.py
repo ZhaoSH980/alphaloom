@@ -8,13 +8,18 @@
   收紧/否决上游信号（如 long 但 close<ema 或 atr 过小 → 降级 hold；否则透传）
 - 成本注解：KnowledgeRetrieve/PADecisionTree 均 cost 0 deterministic True，不触发 llm 审计红线
 """
+import json
+
 import pytest
 import alphaloom.nodes  # 触发全部内置节点注册
-from alphaloom.graph.model import NodeSpec
+from alphaloom.graph.compiler import compile_blueprint
+from alphaloom.graph.model import NodeSpec, loads_loom
 from alphaloom.graph.types import PinType
 from alphaloom.knowledge.corpus import Corpus, load_default_corpus
-from alphaloom.nodes.registry import create_instance, get_node_def
+from alphaloom.nodes.registry import create_instance, get_node_def, node
 from alphaloom.runtime.context import SimClock, RunContext
+from alphaloom.runtime.engine import Engine
+from alphaloom.runtime.events import BarEvent
 
 
 def _ctx():
@@ -68,6 +73,21 @@ def test_bm25_deterministic_same_query_same_result():
     a = corpus.search("martingale risk", top_k=3)
     b = corpus.search("martingale risk", top_k=3)
     assert [(h.doc_id, h.score) for h in a] == [(h.doc_id, h.score) for h in b]
+
+
+def test_bm25_cjk_query_martingale_blowup_hits_dca():
+    """中文查询"马丁格尔 爆仓"命中 dca（CJK 2-gram 分词；语料一半是中文，必须可检索）。"""
+    corpus = load_default_corpus()
+    hits = corpus.search("马丁格尔 爆仓", top_k=3)
+    assert hits, "CJK query must hit the Chinese half of the corpus"
+    assert hits[0].doc_id == "dca", f"top hit should be dca, got {hits[0].doc_id}"
+
+
+def test_bm25_cjk_query_grid_spacing_hits_grid():
+    """中文查询"网格 间距"命中 grid。"""
+    corpus = load_default_corpus()
+    hits = corpus.search("网格 间距", top_k=3)
+    assert hits and hits[0].doc_id == "grid"
 
 
 def test_corpus_bundles_three_hand_written_docs():
@@ -165,6 +185,125 @@ def test_require_citations_gate_passes_hold_regardless():
            "rationale": "x", "confidence": 0.0, "citations": []}
     out = node.on_bar(_ctx(), {"signal": sig})["signal"]
     assert out["side"] == "hold"
+
+
+def test_require_citations_merges_citations_input_pin():
+    """citations 输入 pin（画布连 kr.citations）非 None → 合流进 sig["citations"] 后判门。
+
+    上游 signal 自带 citations 空，但 pin 送来非空 → long 放行且输出 citations 含 pin 内容。
+    """
+    node_ = create_instance(NodeSpec("g", "require_citations", {}))
+    sig = {"side": "long", "qty": 0.0, "stop": 95.0, "reason": "x",
+           "rationale": "x", "confidence": 0.8, "citations": []}
+    out = node_.on_bar(_ctx(), {"signal": sig,
+                                "citations": ["dca: martingale risk"]})["signal"]
+    assert out["side"] == "long"
+    assert "dca: martingale risk" in out["citations"]
+
+
+def test_require_citations_pin_connected_but_empty_still_blocks():
+    """pin 连接了但 kr 检索空（[] 非 None）且 signal 自带 citations 空 → 仍降级 hold。"""
+    node_ = create_instance(NodeSpec("g", "require_citations", {}))
+    sig = {"side": "long", "qty": 0.0, "stop": 95.0, "reason": "x",
+           "rationale": "x", "confidence": 0.8, "citations": []}
+    out = node_.on_bar(_ctx(), {"signal": sig, "citations": []})["signal"]
+    assert out["side"] == "hold"
+
+
+# --------------------------------------------------------------------------- #
+# 画布连通性：kr.citations → rc.citations 编译 + 引擎级（正向放行首次可达）
+# --------------------------------------------------------------------------- #
+
+@node(type="trp_feed", category="test", inputs={}, outputs={"candle": PinType.CANDLE})
+class TrpFeed:
+    def setup(self, params):
+        pass
+
+    def on_bar(self, ctx, inputs):
+        return {"candle": dict(ctx.current_event.candle)}
+
+
+@node(type="trp_long", category="test",
+      inputs={"candle": PinType.CANDLE}, outputs={"signal": PinType.SIGNAL})
+class TrpLong:
+    """恒 long 信号源（citations 自带空 —— 全靠画布上接进来的 kr.citations 放行）。"""
+
+    def setup(self, params):
+        pass
+
+    def on_bar(self, ctx, inputs):
+        close = float(inputs["candle"]["close"])
+        return {"signal": {"side": "long", "qty": 1.0, "stop": close - 1.0,
+                           "reason": "test long", "rationale": "test long",
+                           "confidence": 0.9, "citations": []}}
+
+
+_KR_RC_BP = {
+    "id": "krc", "name": "krc",
+    "nodes": [
+        {"id": "feed", "type": "trp_feed"},
+        {"id": "sig", "type": "trp_long"},
+        {"id": "kr", "type": "knowledge_retrieve",
+         "params": {"query": "martingale risk", "top_k": 2}},
+        {"id": "rc", "type": "require_citations"},
+    ],
+    "edges": [
+        {"from": "feed.candle", "to": "sig.candle"},
+        {"from": "feed.candle", "to": "kr.candle"},
+        {"from": "sig.signal", "to": "rc.signal"},
+        {"from": "kr.citations", "to": "rc.citations"},
+    ],
+}
+
+
+def _run_bp(bp_json, bars=3):
+    bp = loads_loom(json.dumps(bp_json))
+    compiled = compile_blueprint(bp)
+    assert compiled.ok, [e.to_dict() for e in compiled.errors]
+    instances = {n.id: create_instance(n) for n in bp.nodes}
+    eng = Engine(compiled, instances, RunContext(clock=SimClock(), run_id="krc"))
+    rc_signals = []
+    eng.after_node = (lambda nid, outs:
+                      rc_signals.append(outs["signal"].value) if nid == "rc" else None)
+    events = [BarEvent({"ts": i * 60_000, "open": 100, "high": 101, "low": 99,
+                        "close": 100, "volume": 1}, 60_000) for i in range(bars)]
+    eng.run(events)
+    return rc_signals
+
+
+def test_kr_rc_wiring_compiles_no_bad_port_ref():
+    """kr.citations → rc.citations 画布可连通（编译 ok，不 BAD_PORT_REF）。"""
+    bp = loads_loom(json.dumps(_KR_RC_BP))
+    compiled = compile_blueprint(bp)
+    assert compiled.ok, [e.to_dict() for e in compiled.errors]
+
+
+def test_kr_rc_engine_passes_long_when_kr_connected():
+    """引擎级正向路径：kr 产非空 citations → long 放行穿过 rc（不再恒 hold）。"""
+    rc_signals = _run_bp(_KR_RC_BP, bars=3)
+    assert len(rc_signals) == 3
+    for s in rc_signals:
+        assert s["side"] == "long", f"expected pass-through, got {s}"
+        assert s["citations"], "citations must be non-empty after kr merge"
+        assert any("dca" in c for c in s["citations"])
+
+
+def test_kr_rc_engine_demotes_when_kr_disconnected():
+    """负向不回归：kr 未连（citations pin 悬空）→ 退回只看 signal 自带 citations → hold。"""
+    bp_json = {
+        "id": "krc2", "name": "krc2",
+        "nodes": [
+            {"id": "feed", "type": "trp_feed"},
+            {"id": "sig", "type": "trp_long"},
+            {"id": "rc", "type": "require_citations"},
+        ],
+        "edges": [
+            {"from": "feed.candle", "to": "sig.candle"},
+            {"from": "sig.signal", "to": "rc.signal"},
+        ],
+    }
+    rc_signals = _run_bp(bp_json, bars=3)
+    assert all(s["side"] == "hold" for s in rc_signals)
 
 
 # --------------------------------------------------------------------------- #
