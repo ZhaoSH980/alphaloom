@@ -48,6 +48,14 @@
 
 **进化实验室**（spec §6，"Agent 即研究员"终极形态）：`evolve/lab.py::evolve(seed_blueprint, source, llm, *, population=4, generations=3) -> Genealogy`。Agent 读回测报告→提出蓝图**变异**（参数/节点/连线，图 diff）→变异版过编译（**风控类型系统守门——变异不能绕风控**）→回测评估适应度→优者存活进下代→谱系树。本质遗传算法，变异算子是 LLM。**规模硬锁定**：种群≤4、代数≤3、适应度用样本内窗口+终选做验证窗打分（防过拟合，泄漏测试保障）。**降级保险丝**：只做参数变异不动图结构。全程录制。
 
+> **D4-T5 实施注记（sanctioned deviations，控制器 T5 任务书已核准）**：
+> 1. **签名**定为 `evolve(seed_blueprint, source, *, inst, bar, train_window, valid_window, llm, population=4, generations=3, mutations_per_gen=None, param_only=False, initial_cash=10_000.0, fee_rate=0.0005, temperature=0.3) -> Genealogy`（非 `(seed_blueprint, source, llm)`）——窗口/标的参数化对齐 run_backtest；`train_window`/`valid_window` 为 `(start_ms, end_ms)` 显式两窗，**重叠直接 ValueError**（防泄漏是结构保证 + 入口校验双保险）；`mutations_per_gen` 默认 = population、上限 2×MAX_POPULATION=8（LLM 预算护栏，超出 ValueError）。
+> 2. **变异 patch 格式**（任务书授权"格式你定"）：`{summary, set_params: {nodeId: {param: value}}, add_nodes: [...], del_nodes: [...], add_edges: [{"from","to"}], del_edges: [...]}`，应用序 set_params → del_nodes → add_nodes → del_edges → add_edges；应用侧只校验引用存在性与 param_only 保险丝（`MutationRejected` 喂回 LLM 重试），**端点类型是否闭合一律交编译器裁决**（与消融 graph_bypass 同哲学——TYPE_MISMATCH 拦"去 risk_gate"变异，fix_hint 含 RiskGate，测试锁定）。
+> 3. **compile_status 语义**：`repaired` = 经历 ≥1 轮反馈（非 JSON 回复 / patch 被拒 / 编译失败均计）后过编译，非仅"编译失败后修复"——反馈环是同一条（复用 copilot `_errors_to_feedback`），状态如实反映"没有一次过"。stillborn 记录最后一次尝试的蓝图 JSON（若从未成功应用 patch 则为 null）。
+> 4. **选择 = 精英保留**：存活个体与本代孩子同池按适应度排序取 top-N（父代不自动死亡，被挤出才死；平分保老，排序稳定确定）。适应度 = train 窗 return_pct、num_trades==0 判 0（T3 零交易=零证据教义；全员亏损种群里 0 分躺平者居首是"不亏就是赢"的诚实结论，docstring 如实披露）。
+> 5. **Genealogy 形状扩充**：node 增 `survived`（终局存活集标记，React Flow 高亮用）；顶层增 `param_only/population/generations`（实验规模自描述）；winner 增 `train_summary/valid_summary`（完整成绩单，不止四个契约字段）。React Flow 契约保持：nodes + parent_id 即树，blueprint_json 内嵌可直接开画布。
+> 6. 全部测试确定性剧本 LLM（纯本地队列，剧本精确耗尽断言 = 零配额自证）；真实录制演示属 T8。未触碰 data/llm_calls.sqlite。
+
 **Carryover 债务清偿批次**（D2/D3 各 Carryover，D4 前必修的）：
 - `check_stamped` 深递归化（D2 Carryover 13①）——D4 有结构化端口值前处理
 - `@app.on_event` → lifespan 迁移（D2 Carryover 9②）+ RunsStore/worker 连接 finalizers（D2 Carryover 9②/T3 前瞻）
