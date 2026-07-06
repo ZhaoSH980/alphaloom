@@ -24,3 +24,6 @@ docs/assets/logo-archive/
 docs/assets/*-batch-*.png
 docs/assets/alphaloom-logo-v2.png
 docs/assets/alphaloom-logo.png
+
+# local experiment archives — kept out of the public repo
+docs/experiments/
