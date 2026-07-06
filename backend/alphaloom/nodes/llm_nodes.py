@@ -204,6 +204,11 @@ class CommitteeNode:
         self.strategist_prompt = str(params.get("strategist_prompt", _STRATEGIST_SYSTEM))
         self.risk_prompt = str(params.get("risk_prompt", _RISK_SYSTEM))
         self.chair_prompt = str(params.get("chair_prompt", _CHAIR_SYSTEM))
+        # opt-in trend context: feed the strategist the last N closes + trend so it
+        # isn't reasoning off a single candle. Default 0 → market blob byte-identical
+        # to before → committed agent_committee recordings still replay (no hash drift).
+        self.context_window = int(params.get("context_window", 0))
+        self._recent: list[float] = []
 
     def _hold(self, rationale, trace):
         return {"signal": {
@@ -234,10 +239,18 @@ class CommitteeNode:
         ts = int(candle["ts"])
         atr_val = None if atr is None else float(atr)
 
-        market = json.dumps({
-            "close": close, "high": float(candle["high"]), "low": float(candle["low"]),
-            "atr": atr_val,
-        }, sort_keys=True)
+        mkt = {"close": close, "high": float(candle["high"]),
+               "low": float(candle["low"]), "atr": atr_val}
+        if self.context_window > 0:
+            self._recent.append(round(close, 2))
+            if len(self._recent) > self.context_window:
+                self._recent = self._recent[-self.context_window:]
+            first = self._recent[0]
+            chg = (close - first) / first * 100.0 if first else 0.0
+            mkt["recent_closes"] = self._recent
+            mkt["trend_pct"] = round(chg, 3)
+            mkt["trend"] = "up" if chg > 0.3 else "down" if chg < -0.3 else "flat"
+        market = json.dumps(mkt, sort_keys=True)
 
         # --- 角色 1：策略师（读 candle+atr → 提案） ---
         strat_sys = self.strategist_prompt.format(persona=self.strategist_persona)

@@ -164,3 +164,44 @@ def test_committee_skip_risk_officer_registered_param_defaults_off():
     # 默认不跳过：不传参数时三角色三调用（上方既有测试已锁），此处锁 setup 默认值
     node = _committee({"atr_mult": 2.0})
     assert node.skip_risk_officer is False
+
+
+class _RoleLLM:
+    """按 system prompt 角色词回对应 JSON（支持多 bar，每 bar 完整三角色）。"""
+    def __init__(self):
+        self.calls = []
+
+    def chat(self, messages, tools=None, temperature=0.2, **params):
+        self.calls.append({"messages": messages, **params})
+        sysm = "".join(m["content"] for m in messages if m["role"] == "system").lower()
+        content = (_RISK if "risk officer" in sysm
+                   else _CHAIR if "chair" in sysm else _STRAT)
+        return {"choices": [{"message": {"content": json.dumps(content)}}]}
+
+    def strat_users(self):
+        # 策略师是每 bar 三次调用里的第一次（idx 0,3,6…）
+        return ["".join(m["content"] for m in self.calls[i]["messages"] if m["role"] == "user")
+                for i in range(0, len(self.calls), 3)]
+
+
+def test_context_window_default_zero_keeps_market_blob_unchanged():
+    """默认 context_window=0：策略师收到的 market 只有 {atr,close,high,low}，字节不变
+    → committed agent_committee 录制照常回放（无 hash 漂移）。这把向后兼容锁死。"""
+    llm = _RoleLLM()
+    _committee().on_bar(_ctx(llm), {"candle": _CANDLE, "atr": 1.5})
+    market = json.loads(llm.strat_users()[0])
+    assert set(market) == {"atr", "close", "high", "low"}
+    assert "recent_closes" not in market and "trend" not in market
+
+
+def test_context_window_feeds_recent_closes_and_trend():
+    """context_window>0：策略师 market 追加 recent_closes + trend/trend_pct
+    —— 不再只盯一根 K 线（这是让委员会更主动的杠杆）。"""
+    llm = _RoleLLM()
+    node = _committee({"atr_mult": 2.0, "context_window": 3})
+    ctx = _ctx(llm)
+    for close in (100, 105, 110):                       # 上升趋势
+        node.on_bar(ctx, {"candle": {**_CANDLE, "close": close}, "atr": 1.5})
+    last = json.loads(llm.strat_users()[-1])
+    assert last["recent_closes"] == [100.0, 105.0, 110.0]
+    assert last["trend"] == "up" and last["trend_pct"] > 0
