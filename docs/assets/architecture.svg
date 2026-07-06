@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1280 620" font-family="'Segoe UI',system-ui,-apple-system,sans-serif" role="img" aria-label="AlphaLoom architecture: blueprint compiles into a trading agent, runs, is evaluated, and the LLM rewrites the graph in a closed loop">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#070a14"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="0.5" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <radialGradient id="pulse" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#e0f2fe"/>
+      <stop offset="0.4" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="pulseGold" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff7ed"/>
+      <stop offset="0.4" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arw" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#3b4a6b"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="620" rx="18" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="1279" height="619" rx="18" fill="none" stroke="#1b2540" stroke-width="1"/>
+
+  <!-- header -->
+  <text x="40" y="58" fill="#f59e0b" font-size="30" font-weight="700" letter-spacing="0.5">AlphaLoom</text>
+  <text x="230" y="58" fill="#5b6b8c" font-size="16" letter-spacing="3" font-weight="600">THE GRAPH IS THE AGENT</text>
+  <text x="40" y="86" fill="#8ea2c6" font-size="14">A visual blueprint <tspan fill="#cbd5e1" font-weight="600">compiles</tspan> into an executable, falsifiable trading agent — judged by market data, not vibes.</text>
+
+  <!-- ============ pipeline stages ============ -->
+  <!-- Box template: rounded rect + accent bar -->
+  <!-- 1 BLUEPRINT -->
+  <g>
+    <rect x="30" y="150" width="210" height="150" rx="12" fill="#0f1730" stroke="#2a3a5e" stroke-width="1.2"/>
+    <rect x="30" y="150" width="210" height="4" rx="2" fill="#a78bfa"/>
+    <text x="46" y="182" fill="#a78bfa" font-size="12" font-weight="700" letter-spacing="1">① BLUEPRINT</text>
+    <text x="46" y="202" fill="#7f92b6" font-size="11">visual node graph · .loom</text>
+    <!-- mini node graph -->
+    <g stroke="#3f5b8a" stroke-width="1.4" fill="#63b3ff">
+      <line x1="70" y1="245" x2="120" y2="230"/><line x1="70" y1="245" x2="120" y2="268"/>
+      <line x1="120" y1="230" x2="175" y2="248"/><line x1="120" y1="268" x2="175" y2="248"/>
+      <line x1="175" y1="248" x2="210" y2="248" stroke="#ef4444"/>
+      <circle cx="70" cy="245" r="6" fill="#a78bfa"/><circle cx="120" cy="230" r="6" fill="#38bdf8"/>
+      <circle cx="120" cy="268" r="6" fill="#34d399"/><circle cx="175" cy="248" r="7" fill="#ef4444"/>
+    </g>
+    <text x="150" y="292" fill="#8493b3" font-size="9">risk-stamp gate 🔒</text>
+  </g>
+
+  <!-- 2 COMPILER -->
+  <g>
+    <rect x="280" y="150" width="210" height="150" rx="12" fill="#0f1730" stroke="#2a3a5e" stroke-width="1.2"/>
+    <rect x="280" y="150" width="210" height="4" rx="2" fill="#38bdf8"/>
+    <text x="296" y="182" fill="#38bdf8" font-size="12" font-weight="700" letter-spacing="1">② COMPILER</text>
+    <text x="296" y="202" fill="#7f92b6" font-size="11">the honest compiler</text>
+    <g font-size="11" fill="#b7c6e0">
+      <text x="296" y="228">✓ type-checked pins</text>
+      <text x="296" y="250"><tspan fill="#f87171">🔒</tspan> risk-stamp = compliance officer</text>
+      <text x="296" y="272">📜 static cost certificate</text>
+      <text x="296" y="292" fill="#6b7ea3" font-size="10">as-of causal typing (no look-ahead)</text>
+    </g>
+  </g>
+
+  <!-- 3 ENGINE -->
+  <g>
+    <rect x="530" y="150" width="210" height="150" rx="12" fill="#0f1730" stroke="#2a3a5e" stroke-width="1.2"/>
+    <rect x="530" y="150" width="210" height="4" rx="2" fill="#22d3ee"/>
+    <text x="546" y="182" fill="#22d3ee" font-size="12" font-weight="700" letter-spacing="1">③ ENGINE</text>
+    <text x="546" y="202" fill="#7f92b6" font-size="11">event-driven waves</text>
+    <g fill="#2dd4bf">
+      <rect x="548" y="228" width="10" height="40" rx="2" opacity="0.5"><animate attributeName="height" values="40;18;40" dur="2.4s" repeatCount="indefinite"/><animate attributeName="y" values="228;250;228" dur="2.4s" repeatCount="indefinite"/></rect>
+      <rect x="564" y="220" width="10" height="48" rx="2" opacity="0.7"><animate attributeName="height" values="48;28;48" dur="2.4s" begin="0.3s" repeatCount="indefinite"/><animate attributeName="y" values="220;240;220" dur="2.4s" begin="0.3s" repeatCount="indefinite"/></rect>
+      <rect x="580" y="232" width="10" height="36" rx="2" opacity="0.5"><animate attributeName="height" values="36;52;36" dur="2.4s" begin="0.6s" repeatCount="indefinite"/><animate attributeName="y" values="232;216;232" dur="2.4s" begin="0.6s" repeatCount="indefinite"/></rect>
+    </g>
+    <text x="600" y="252" fill="#b7c6e0" font-size="11">deterministic</text>
+    <text x="600" y="270" fill="#b7c6e0" font-size="11">record / replay</text>
+    <text x="546" y="292" fill="#6b7ea3" font-size="10">breakpoints · time-travel debug</text>
+  </g>
+
+  <!-- 4 BROKER -->
+  <g>
+    <rect x="780" y="150" width="210" height="150" rx="12" fill="#0f1730" stroke="#2a3a5e" stroke-width="1.2"/>
+    <rect x="780" y="150" width="210" height="4" rx="2" fill="#34d399"/>
+    <text x="796" y="182" fill="#34d399" font-size="12" font-weight="700" letter-spacing="1">④ BROKER</text>
+    <text x="796" y="202" fill="#7f92b6" font-size="11">paper fills</text>
+    <!-- candlesticks -->
+    <g stroke-width="2">
+      <line x1="812" y1="224" x2="812" y2="272" stroke="#34d399"/><rect x="807" y="236" width="10" height="22" fill="#34d399"/>
+      <line x1="836" y1="228" x2="836" y2="276" stroke="#f87171"/><rect x="831" y="240" width="10" height="20" fill="#f87171"/>
+      <line x1="860" y1="220" x2="860" y2="268" stroke="#34d399"/><rect x="855" y="232" width="10" height="24" fill="#34d399"/>
+    </g>
+    <text x="885" y="246" fill="#b7c6e0" font-size="11">next-bar open</text>
+    <text x="885" y="264" fill="#b7c6e0" font-size="11">no look-ahead</text>
+    <text x="796" y="292" fill="#6b7ea3" font-size="10">attached stops · EOD settle</text>
+  </g>
+
+  <!-- 5 EVAL LAB -->
+  <g>
+    <rect x="1030" y="150" width="210" height="150" rx="12" fill="#0f1730" stroke="#3a4d2e" stroke-width="1.2"/>
+    <rect x="1030" y="150" width="210" height="4" rx="2" fill="#f59e0b"/>
+    <text x="1046" y="182" fill="#f59e0b" font-size="12" font-weight="700" letter-spacing="1">⑤ EVAL LAB</text>
+    <text x="1046" y="202" fill="#7f92b6" font-size="11">honest evaluation</text>
+    <g font-size="11" fill="#b7c6e0">
+      <text x="1046" y="226">📉 fidelity ladder (lie detector)</text>
+      <text x="1046" y="247">🏆 scorecard · baselines</text>
+      <text x="1046" y="268">⚖️ committee ablation</text>
+      <text x="1046" y="289" fill="#6b7ea3" font-size="10">🧬 evolution genealogy</text>
+    </g>
+  </g>
+
+  <!-- ============ forward connectors (animated) ============ -->
+  <g stroke="#2c3c5e" stroke-width="2" marker-end="url(#arw)">
+    <line x1="240" y1="225" x2="280" y2="225"/>
+    <line x1="490" y1="225" x2="530" y2="225"/>
+    <line x1="740" y1="225" x2="780" y2="225"/>
+    <line x1="990" y1="225" x2="1030" y2="225"/>
+  </g>
+  <!-- flowing dashes on top -->
+  <g stroke="url(#flow)" stroke-width="2.2" stroke-dasharray="6 10" fill="none" opacity="0.9">
+    <line x1="240" y1="225" x2="280" y2="225"><animate attributeName="stroke-dashoffset" values="32;0" dur="1s" repeatCount="indefinite"/></line>
+    <line x1="490" y1="225" x2="530" y2="225"><animate attributeName="stroke-dashoffset" values="32;0" dur="1s" repeatCount="indefinite"/></line>
+    <line x1="740" y1="225" x2="780" y2="225"><animate attributeName="stroke-dashoffset" values="32;0" dur="1s" repeatCount="indefinite"/></line>
+    <line x1="990" y1="225" x2="1030" y2="225"><animate attributeName="stroke-dashoffset" values="32;0" dur="1s" repeatCount="indefinite"/></line>
+  </g>
+
+  <!-- ============ traveling signal pulse across the whole pipeline ============ -->
+  <circle r="10" fill="url(#pulse)" filter="url(#glow)">
+    <animateMotion dur="4.5s" repeatCount="indefinite" calcMode="linear"
+      path="M135,225 L240,225 L280,225 L490,225 L530,225 L740,225 L780,225 L990,225 L1030,225 L1135,225"/>
+    <animate attributeName="opacity" values="0;1;1;1;1;0" dur="4.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle r="4.5" fill="#f0f9ff">
+    <animateMotion dur="4.5s" repeatCount="indefinite" calcMode="linear"
+      path="M135,225 L240,225 L280,225 L490,225 L530,225 L740,225 L780,225 L990,225 L1030,225 L1135,225"/>
+    <animate attributeName="opacity" values="0;1;1;1;1;0" dur="4.5s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- ============ feedback loop: eval -> blueprint (the agent rewrites itself) ============ -->
+  <path id="loop" d="M1135,300 C1135,470 1030,505 640,505 C250,505 135,470 135,300"
+        fill="none" stroke="#2c3c5e" stroke-width="2" marker-end="url(#arw)"/>
+  <path d="M1135,300 C1135,470 1030,505 640,505 C250,505 135,470 135,300"
+        fill="none" stroke="#f59e0b" stroke-width="2.2" stroke-dasharray="7 12" opacity="0.75">
+    <animate attributeName="stroke-dashoffset" values="0;38" dur="1.4s" repeatCount="indefinite"/>
+  </path>
+  <circle r="8" fill="url(#pulseGold)" filter="url(#glow)">
+    <animateMotion dur="5s" repeatCount="indefinite" calcMode="linear">
+      <mpath xlink:href="#loop" href="#loop"/>
+    </animateMotion>
+  </circle>
+  <rect x="500" y="490" width="280" height="30" rx="15" fill="#131c33" stroke="#3a4d2e"/>
+  <text x="640" y="510" fill="#f0b45f" font-size="12.5" font-weight="600" text-anchor="middle">Copilot · Evolution — the LLM rewrites the graph</text>
+  <text x="640" y="548" fill="#5f7098" font-size="11" text-anchor="middle">compile-gated: a mutation that bypasses the risk-stamp <tspan fill="#f87171">fails to compile</tspan> — the type system is the compliance officer</text>
+
+  <!-- footer caption -->
+  <text x="40" y="592" fill="#4a5a7d" font-size="11">Every LLM call is recorded → offline replay is deterministic &amp; zero-quota. Backtests are lie-detected across four fill models before you trust them.</text>
+</svg>
