@@ -1,8 +1,12 @@
 name: CI
 
 # Offline / deterministic only: the backend tests inject a scripted fake LLM (pure
-# local functions, zero network) and ALPHALOOM_OFFLINE=1 forces record/replay, so CI
-# never touches a real LLM endpoint and burns zero quota. No secrets are needed.
+# local functions, zero network); tests that need record/replay set ALPHALOOM_OFFLINE
+# themselves via monkeypatch. There is no .env in CI, so _build_llm_client returns
+# None and no real LLM endpoint is ever reached — zero quota, no secrets needed.
+# (Do NOT set ALPHALOOM_OFFLINE globally here: it makes create_app auto-build an
+# offline client, breaking test_deterministic_endpoints_work_without_llm_client,
+# which asserts app.state.llm is None when nothing is configured.)
 
 on:
   push:
@@ -22,8 +26,6 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
-    env:
-      ALPHALOOM_OFFLINE: "1"
     steps:
       - uses: actions/checkout@v4
 
