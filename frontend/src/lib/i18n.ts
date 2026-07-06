@@ -2,7 +2,8 @@
 import { useSyncExternalStore } from "react";
 
 const dict = {
-  zh: { studio: "蓝图工坊", terminal: "交易终端", run: "回测运行", compileOk: "编译通过",
+  zh: { statusOffline: "离线回放 · 零配额", statusLive: "实时 · 真实 LLM", statusNone: "确定性 · 无 LLM",
+        studio: "蓝图工坊", terminal: "交易终端", run: "回测运行", compileOk: "编译通过",
         compileFail: "编译失败", cost: "成本证书", gallery: "蓝图库", save: "保存",
         resume: "继续", step: "单步", stop: "停止", paused: "已暂停", trades: "成交",
         equity: "权益", summary: "汇总", noRuns: "暂无运行", breakpointHint: "点节点圆点设断点",
@@ -45,7 +46,8 @@ const dict = {
         seedBlueprint: "种子蓝图", gen: "代", paramOnly: "仅参数变异",
         runFidelity: "跑保真度阶梯", runScorecard: "生成记分卡", noEvidence: "无证据",
         genealogyEmpty: "无谱系数据（运行进化实验）" },
-  en: { studio: "Studio", terminal: "Terminal", run: "Run backtest", compileOk: "Compiled",
+  en: { statusOffline: "offline replay · zero-quota", statusLive: "live · real LLM", statusNone: "deterministic · no LLM",
+        studio: "Studio", terminal: "Terminal", run: "Run backtest", compileOk: "Compiled",
         compileFail: "Compile failed", cost: "Cost certificate", gallery: "Gallery", save: "Save",
         resume: "Resume", step: "Step", stop: "Stop", paused: "Paused", trades: "Trades",
         equity: "Equity", summary: "Summary", noRuns: "No runs yet", breakpointHint: "Click node dot to set breakpoint",

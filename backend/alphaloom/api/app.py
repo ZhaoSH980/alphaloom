@@ -119,6 +119,19 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
                         "cost": d.cost.__dict__})
         return sorted(out, key=lambda x: (x["category"], x["type"]))
 
+    @app.get("/api/status")
+    def status():
+        # Honest runtime mode for the header readout: is the LLM handle a
+        # zero-quota offline replay, a live real endpoint, or absent entirely?
+        llm = app.state.llm
+        if llm is None:
+            mode = "none"          # no LLM configured — deterministic blueprints only
+        elif getattr(llm, "offline", False):
+            mode = "offline"       # committed recordings, zero network, zero quota
+        else:
+            mode = "live"          # real endpoint — real calls burn real quota
+        return {"llm_mode": mode, "model": getattr(llm, "model", None)}
+
     @app.post("/api/compile")
     def compile_ep(body: CompileIn):
         if body.bar not in _BARS:

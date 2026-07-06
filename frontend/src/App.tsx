@@ -1,17 +1,27 @@
 // frontend/src/App.tsx —— hash 路由外壳（HUD 指挥条）
 import { useEffect, useState, lazy, Suspense } from "react";
 import { useLang } from "./lib/i18n";
+import { getStatus } from "./lib/api";
 
 const Studio = lazy(() => import("./pages/Studio"));
 const Terminal = lazy(() => import("./pages/Terminal"));
 const Eval = lazy(() => import("./pages/Eval"));
 
+// honest runtime-mode readout: don't hardcode "offline" — reflect the actual backend
+const MODE_STYLE = {
+  offline: { color: "rgba(52,211,153,0.8)", dot: "#34d399", key: "statusOffline" },   // zero-quota
+  live:    { color: "rgba(245,166,35,0.9)", dot: "#f5a623", key: "statusLive" },       // burning real quota
+  none:    { color: "rgba(148,163,184,0.7)", dot: "#64748b", key: "statusNone" },      // deterministic only
+} as const;
+
 export default function App() {
   const { t, lang, setLang } = useLang();
   const [route, setRoute] = useState(location.hash || "#/studio");
+  const [llmMode, setLlmMode] = useState<"offline" | "live" | "none" | null>(null);
   useEffect(() => {
     const f = () => setRoute(location.hash || "#/studio");
     addEventListener("hashchange", f);
+    getStatus().then((s) => setLlmMode(s.llm_mode)).catch(() => setLlmMode(null));
     return () => removeEventListener("hashchange", f);
   }, []);
 
@@ -42,10 +52,15 @@ export default function App() {
           {tab("#/studio", t("studio"))}{tab("#/terminal", t("terminal"))}{tab("#/eval", t("evalLab"))}
         </nav>
         <div className="ml-auto flex items-center gap-5">
-          <div className="hidden md:flex items-center gap-2">
-            <span className="live-dot" />
-            <span className="hud-label" style={{ color: "rgba(52,211,153,0.75)" }}>offline replay · zero-quota</span>
-          </div>
+          {llmMode && (
+            <div className="hidden md:flex items-center gap-2" title={MODE_STYLE[llmMode].key === "statusLive"
+              ? "real endpoint — live calls burn real quota" : undefined}>
+              <span className="live-dot" style={{ background: MODE_STYLE[llmMode].dot,
+                boxShadow: `0 0 8px 1px ${MODE_STYLE[llmMode].dot}` }} />
+              <span className="hud-label" style={{ color: MODE_STYLE[llmMode].color }}>
+                {t(MODE_STYLE[llmMode].key)}</span>
+            </div>
+          )}
           <button
             className="font-display text-[11px] font-semibold tracking-widest text-slate-400 hover:text-loom-blue transition-colors px-2 py-1 rounded border border-edge/60 hover:border-loom-blue/50"
             onClick={() => setLang(lang === "zh" ? "en" : "zh")}>{lang === "zh" ? "EN" : "中"}</button>

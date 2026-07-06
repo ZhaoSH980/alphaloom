@@ -7,6 +7,8 @@ async function j<T>(r: Promise<Response>): Promise<T> {
   return res.json();
 }
 export const getNodes = () => j<NodeDef[]>(fetch("/api/nodes"));
+export const getStatus = () =>
+  j<{ llm_mode: "offline" | "live" | "none"; model: string | null }>(fetch("/api/status"));
 export const compileLoom = (blueprint: Loom, bar = "1m") =>
   j<{ ok: boolean; errors: { code: string; message: string; node_id?: string; port?: string; fix_hint?: string }[];
       certificate: Record<string, unknown> | null; order: string[] }>(
