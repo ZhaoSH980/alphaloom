@@ -11,8 +11,8 @@ OUT = ROOT / "docs" / "assets" / "architecture-loop.gif"
 
 W, H = 1000, 384
 SCALE = 2
-FRAME_COUNT = 54
-FRAME_MS = 78
+FRAME_COUNT = 72
+FRAME_MS = 70
 
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -26,9 +26,9 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.Im
     return ImageFont.load_default()
 
 
-FONT_TITLE = font(22, True)
-FONT_SUB = font(11)
-FONT_LABEL = font(15, True)
+FONT_TITLE = font(21, True)
+FONT_SUB = font(12)
+FONT_LABEL = font(17, True)
 FONT_TINY = font(10, True)
 
 
@@ -54,13 +54,14 @@ BG = gradient_bg()
 
 
 CARDS = [
-    ("Blueprint", "Studio", "typed .loom graph", "cyan", (40, 107, 117, 98)),
-    ("Compiler", "", "pins, cycles, cost", "cyan", (175, 107, 117, 98)),
-    ("RiskGate", "", "risk_stamped_signal", "gold", (310, 107, 117, 98)),
-    ("Runtime", "Broker", "fills, stops, equity", "cyan", (445, 107, 117, 98)),
-    ("Recorder", "", "full node I/O replay", "cyan", (580, 107, 117, 98)),
-    ("Eval Lab", "", "fidelity, ablation", "cyan", (715, 107, 117, 98)),
-    ("Copilot", "Evolution", "mutate and repair", "cyan", (850, 107, 117, 98)),
+    ("Input", "", "intent + data", "cyan", (28, 112, 105, 98)),
+    ("Blueprint", "Studio", "typed .loom graph", "cyan", (151, 112, 105, 98)),
+    ("Compiler", "", "pins, cycles, cost", "cyan", (274, 112, 105, 98)),
+    ("RiskGate", "", "risk stamp required", "risk", (397, 112, 105, 98)),
+    ("Runtime", "Broker", "fills, stops, equity", "cyan", (520, 112, 105, 98)),
+    ("Recorder", "", "node I/O replay", "cyan", (643, 112, 105, 98)),
+    ("Eval Lab", "", "fidelity, baselines", "cyan", (766, 112, 105, 98)),
+    ("Copilot", "Evolution", "mutate + repair", "cyan", (889, 112, 105, 98)),
 ]
 
 CHIPS = [
@@ -73,6 +74,24 @@ CHIPS = [
 def center(rect: tuple[int, int, int, int]) -> tuple[float, float]:
     x, y, w, h = rect
     return x + w / 2, y + h / 2
+
+
+def left_edge(rect: tuple[int, int, int, int]) -> tuple[float, float]:
+    x, y, _w, h = rect
+    return x, y + h / 2
+
+
+def right_edge(rect: tuple[int, int, int, int]) -> tuple[float, float]:
+    x, y, w, h = rect
+    return x + w, y + h / 2
+
+
+def append_line(points: list[tuple[float, float]], a: tuple[float, float], b: tuple[float, float], count: int) -> None:
+    if not points:
+        points.append(a)
+    for i in range(1, count + 1):
+        t = i / count
+        points.append((lerp(a[0], b[0], t), lerp(a[1], b[1], t)))
 
 
 def sample_curve(p0, p1, p2, p3, count: int) -> list[tuple[float, float]]:
@@ -98,32 +117,48 @@ def sample_curve(p0, p1, p2, p3, count: int) -> list[tuple[float, float]]:
 def build_path() -> list[tuple[float, float]]:
     pts: list[tuple[float, float]] = []
     centers = [center(c[4]) for c in CARDS]
-    for a, b in zip(centers, centers[1:]):
-        for i in range(18):
-            t = i / 18
-            pts.append((lerp(a[0] + 58, b[0] - 58, t), lerp(a[1], b[1], t)))
+    for i in range(len(CARDS) - 1):
+        append_line(pts, centers[i], right_edge(CARDS[i][4]), 6)
+        append_line(pts, right_edge(CARDS[i][4]), left_edge(CARDS[i + 1][4]), 10)
+        append_line(pts, left_edge(CARDS[i + 1][4]), centers[i + 1], 6)
+    last_drop = (centers[-1][0], centers[-1][1] + 70)
+    first_drop = (centers[0][0], centers[0][1] + 70)
+    append_line(pts, centers[-1], last_drop, 8)
     pts.extend(
         sample_curve(
-            (centers[-1][0], centers[-1][1] + 72),
+            last_drop,
             (centers[-1][0], 292),
             (centers[0][0], 292),
-            (centers[0][0], centers[0][1] + 72),
+            first_drop,
             92,
-        )
+        )[1:]
     )
+    append_line(pts, first_drop, centers[0], 8)
     return pts
 
 
 PATH = build_path()
 
 
-def active_index(progress: float) -> int:
-    centers = [center(c[4]) for c in CARDS]
-    idx = 0
-    for i, c in enumerate(centers):
-        if progress * (len(PATH) - 1) >= i * 18:
-            idx = i
-    return min(idx, len(CARDS) - 1)
+def active_card_index(point: tuple[float, float]) -> int | None:
+    px, py = point
+    for i, (_line1, _line2, _sub, _kind, rect) in enumerate(CARDS):
+        x, y, w, h = rect
+        if x - 8 <= px <= x + w + 8 and y - 8 <= py <= y + h + 8:
+            return i
+    return None
+
+
+def distance_to_segment(p: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+    px, py = p
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    denom = dx * dx + dy * dy
+    if denom <= 1e-9:
+        return math.hypot(px - ax, py - ay)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / denom))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 
 
 def draw_glow(draw_img: Image.Image, rect: tuple[int, int, int, int], color: tuple[int, int, int], alpha: int) -> None:
@@ -150,7 +185,6 @@ def draw_frame(frame: int) -> Image.Image:
     draw = ImageDraw.Draw(img)
 
     # Soft market-like contour lines.
-    wave_shift = progress * 36
     draw.line(
         [(34, 338), (160, 300 + 8 * math.sin(progress * 6)), (315, 315), (510, 292), (765, 305), (960, 264)],
         fill=(20, 61, 53, 160),
@@ -161,74 +195,75 @@ def draw_frame(frame: int) -> Image.Image:
         fill=(18, 61, 75, 150),
         width=2,
     )
-    draw.rectangle((0, int(80 + wave_shift) % H, W, int(81 + wave_shift) % H), fill=(48, 231, 213, 32))
-
-    draw.text((48, 30), "Compile-gated trading agent loop", fill="#F8FAFC", font=FONT_TITLE)
+    draw.text((48, 23), "Compile-gated trading", fill="#F8FAFC", font=FONT_TITLE)
+    draw.text((48, 48), "agent loop", fill="#F8FAFC", font=FONT_TITLE)
     draw.text(
-        (48, 58),
-        "A visual graph runs only after cost, causality, and risk contracts compile.",
+        (48, 78),
+        "Input becomes a visual graph only after cost, causality, and risk contracts compile.",
         fill="#9FB4C0",
         font=FONT_SUB,
     )
 
-    idx = active_index(progress)
+    p_idx = int(progress * len(PATH)) % len(PATH)
+    point = PATH[p_idx]
+    active_idx = active_card_index(point)
     for i, (line1, line2, sub, kind, rect) in enumerate(CARDS):
         x, y, w, h = rect
-        reached = i <= idx
+        active = i == active_idx
         pulse = 0.5 + 0.5 * math.sin(progress * math.tau * 3 + i)
-        if reached:
-            color = (250, 204, 21) if kind == "gold" else (48, 231, 213)
-            draw_glow(img, rect, color, 50 + int(35 * pulse))
-        fill = "#1F180A" if kind == "gold" else "#08141C"
-        outline = "#FACC15" if kind == "gold" else "#7DD3FC"
-        outline_alpha = 225 if reached else 82
+        if active:
+            color = (48, 231, 213)
+            draw_glow(img, rect, color, 72 + int(45 * pulse))
+        fill = "#0B1C27" if active else "#08141C"
+        outline = "#7DD3FC"
+        outline_alpha = 255 if active else 98
         draw.rounded_rectangle(
             (x, y, x + w, y + h),
             radius=14,
             fill=fill,
             outline=outline,
-            width=2 if reached else 1,
+            width=3 if active else 1,
         )
-        if not reached:
+        if not active:
             overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            ImageDraw.Draw(overlay).rounded_rectangle((x, y, x + w, y + h), radius=14, fill=(0, 0, 0, 88))
+            ImageDraw.Draw(overlay).rounded_rectangle((x, y, x + w, y + h), radius=14, fill=(0, 0, 0, 28))
             img.alpha_composite(overlay)
         # Re-draw outline after dim overlay.
         draw = ImageDraw.Draw(img)
         draw.rounded_rectangle(
             (x, y, x + w, y + h),
             radius=14,
-            outline=(*((250, 204, 21) if kind == "gold" else (125, 211, 252)), outline_alpha),
-            width=2 if reached else 1,
+            outline=(125, 211, 252, outline_alpha),
+            width=3 if active else 1,
         )
         text_y = y + 28 if line2 else y + 39
         draw.text((x + 19, text_y), line1, fill="#F8FAFC", font=FONT_LABEL)
         if line2:
             draw.text((x + 19, y + 51), line2, fill="#F8FAFC", font=FONT_LABEL)
-        if kind == "gold":
-            draw.text((x + 19, y + 67), "only legal order path", fill="#FDE68A", font=FONT_TINY)
-            draw.text((x + 19, y + 81), "risk stamp required", fill="#B6A56E", font=FONT_SUB)
+        if kind == "risk":
+            draw.text((x + 14, y + 67), "legal order path", fill="#FDE68A", font=FONT_TINY)
+            draw.text((x + 14, y + 81), "stamp required", fill="#B6A56E", font=FONT_SUB)
         else:
-            draw.text((x + 19, y + 77), sub, fill="#9FB4C0", font=FONT_SUB)
+            draw.text((x + 14, y + 77), sub, fill="#9FB4C0", font=FONT_SUB)
 
     centers = [center(c[4]) for c in CARDS]
-    for i, (a, b) in enumerate(zip(centers, centers[1:])):
-        start = (a[0] + 58, a[1])
-        end = (b[0] - 58, b[1])
-        col = (118, 228, 247, 230) if i < idx else (85, 117, 128, 110)
-        if i == 1:
-            col = (250, 204, 21, 230) if i < idx else (126, 103, 41, 130)
-        draw_arrow(draw, start, end, col, 3 if i < idx else 2)
+    for i in range(len(CARDS) - 1):
+        start = right_edge(CARDS[i][4])
+        end = left_edge(CARDS[i + 1][4])
+        near = distance_to_segment(point, start, end) < 18
+        col = (118, 228, 247, 235) if near else (85, 117, 128, 105)
+        draw_arrow(draw, start, end, col, 3 if near else 2)
 
     # Return loop.
     loop = sample_curve(
-        (centers[-1][0], centers[-1][1] + 72),
+        (centers[-1][0], centers[-1][1] + 70),
         (centers[-1][0], 292),
         (centers[0][0], 292),
-        (centers[0][0], centers[0][1] + 72),
+        (centers[0][0], centers[0][1] + 70),
         92,
     )
-    loop_color = (118, 228, 247, 190) if idx >= len(CARDS) - 1 else (80, 112, 120, 90)
+    on_loop = active_idx is None and point[1] > 224
+    loop_color = (118, 228, 247, 210) if on_loop else (80, 112, 120, 95)
     for a, b in zip(loop, loop[1:]):
         draw.line((a, b), fill=loop_color, width=2)
     draw.text(
@@ -239,21 +274,38 @@ def draw_frame(frame: int) -> Image.Image:
     )
 
     # Moving packet and trail.
-    p_idx = int(progress * len(PATH)) % len(PATH)
     trail = []
     for k in range(15):
         trail.append(PATH[(p_idx - k) % len(PATH)])
-    for k, point in enumerate(reversed(trail)):
+    for k, trail_point in enumerate(reversed(trail)):
         alpha = int(20 + 140 * (k / max(len(trail) - 1, 1)))
         r = int(2 + 4 * (k / max(len(trail) - 1, 1)))
-        draw.ellipse((point[0] - r, point[1] - r, point[0] + r, point[1] + r), fill=(48, 231, 213, alpha))
-    point = PATH[p_idx]
+        draw.ellipse(
+            (trail_point[0] - r, trail_point[1] - r, trail_point[0] + r, trail_point[1] + r),
+            fill=(48, 231, 213, alpha),
+        )
     draw.ellipse((point[0] - 8, point[1] - 8, point[0] + 8, point[1] + 8), fill=(250, 204, 21, 245))
     draw.ellipse((point[0] - 3, point[1] - 3, point[0] + 3, point[1] + 3), fill=(255, 255, 255, 250))
+    if active_idx is not None:
+        line1, line2, sub, kind, rect = CARDS[active_idx]
+        x, y, _w, _h = rect
+        text_y = y + 28 if line2 else y + 39
+        draw.text((x + 19, text_y), line1, fill="#F8FAFC", font=FONT_LABEL)
+        if line2:
+            draw.text((x + 19, y + 51), line2, fill="#F8FAFC", font=FONT_LABEL)
+        if kind == "risk":
+            draw.text((x + 14, y + 67), "legal order path", fill="#FDE68A", font=FONT_TINY)
+            draw.text((x + 14, y + 81), "stamp required", fill="#B6A56E", font=FONT_SUB)
+        else:
+            draw.text((x + 14, y + 77), sub, fill="#9FB4C0", font=FONT_SUB)
 
     for i, (title, sub, rect) in enumerate(CHIPS):
         x, y, w, h = rect
-        active = (idx <= 2 and i == 0) or (3 <= idx <= 4 and i == 1) or (idx >= 5 and i == 2)
+        active = (
+            (active_idx is not None and active_idx <= 3 and i == 0)
+            or (active_idx is not None and 4 <= active_idx <= 5 and i == 1)
+            or (active_idx is not None and active_idx >= 6 and i == 2)
+        )
         outline = (125, 211, 252, 120 + (80 if active else 0))
         draw.rounded_rectangle((x, y, x + w, y + h), radius=12, fill=(5, 15, 20, 230), outline=outline, width=1)
         draw.text((x + 18, y + 12), title, fill="#B6F3EE" if active else "#88A5AA", font=FONT_TINY)
