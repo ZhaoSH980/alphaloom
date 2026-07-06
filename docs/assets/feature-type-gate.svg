@@ -19,10 +19,10 @@
       <path d="M2 2L10 6L2 10V2Z" fill="#FACC15"/>
     </marker>
     <style>
-      .title { font: 800 26px "Segoe UI", Arial, sans-serif; fill: #F8FAFC; }
-      .label { font: 700 18px "Segoe UI", Arial, sans-serif; fill: #E2E8F0; }
-      .sub { font: 600 13px "Segoe UI", Arial, sans-serif; fill: #8CA3B8; }
-      .tiny { font: 700 11px "Segoe UI", Arial, sans-serif; fill: #A7F3D0; }
+      .title { font: 800 30px "Segoe UI", Arial, sans-serif; fill: #F8FAFC; }
+      .label { font: 700 21px "Segoe UI", Arial, sans-serif; fill: #E2E8F0; }
+      .sub { font: 600 15px "Segoe UI", Arial, sans-serif; fill: #8CA3B8; }
+      .tiny { font: 700 13px "Segoe UI", Arial, sans-serif; fill: #A7F3D0; }
       .card { fill: #081421; stroke: #2A5B85; stroke-width: 1.6; }
       .risk { fill: #1E1A0B; stroke: #FACC15; stroke-width: 2; }
       .bad { stroke: #FB7185; stroke-width: 2.8; stroke-dasharray: 8 8; }

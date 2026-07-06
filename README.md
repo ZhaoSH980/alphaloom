@@ -37,32 +37,21 @@ Opens `http://127.0.0.1:8000/#/studio`, builds what is missing, runs offline rep
 
 ## Blueprint Features
 
-<table>
-<tr>
-<td width="50%">
 <img src="docs/assets/feature-type-gate.svg" alt="Typed risk gate diagram" width="100%"><br>
 <strong>Risk is a type contract.</strong><br>
 <code>ExecuteOrder</code> only accepts a <code>risk_stamped_signal</code>. Raw LLM output cannot trade.
-</td>
-<td width="50%">
+
 <img src="docs/assets/feature-cost-cert.svg" alt="Static cost certificate diagram" width="100%"><br>
 <strong>Cost is known before runtime.</strong><br>
 The compiler emits LLM calls per bar, token ceiling, latency class, and deterministic ratio.
-</td>
-</tr>
-<tr>
-<td width="50%">
+
 <img src="docs/assets/feature-replay-loop.svg" alt="Offline replay loop diagram" width="100%"><br>
 <strong>Demos are deterministic.</strong><br>
 Recorded LLM calls replay from hashed requests: same prompts, same responses, zero network calls.
-</td>
-<td width="50%">
+
 <img src="docs/assets/feature-eval-lab.svg" alt="Falsifiable evaluation stack diagram" width="100%"><br>
 <strong>Evaluation is falsifiable.</strong><br>
 Real candles, fidelity ladder, baselines, risk sensitivity, and evolution genealogy judge the graph.
-</td>
-</tr>
-</table>
 
 ## Real Market Smoke Test
 
@@ -82,7 +71,13 @@ This is a smoke test, not an alpha claim. Reproduction notes live in [`docs/real
 
 ## Visual Proof
 
+<strong>Preset Blueprint Studio.</strong> The first image is a clean render of the committed `agent_committee_v1` preset blueprint, including all 13 nodes and 19 typed edges.
+
 <img src="docs/screenshots/studio.png" alt="Blueprint Studio with typed graph and cost certificate" width="100%">
+
+<strong>Realtime Offline Player.</strong> Generated from the same real OKX SOL replay: progress, equity, and fill events advance from recorded runtime data.
+
+<img src="docs/assets/offline-player.gif" alt="Realtime offline replay player for real OKX SOL smoke test" width="100%">
 
 <table>
 <tr>
@@ -109,7 +104,7 @@ This is a smoke test, not an alpha claim. Reproduction notes live in [`docs/real
 | 1 | Studio graph | The agent is the blueprint, not hidden prompt glue. |
 | 2 | `risk_gate -> execute_order` | Risk control is enforced by the compiler. |
 | 3 | Cost certificate | LLM cost and determinism are visible before the run. |
-| 4 | Terminal replay | Fills, equity, citations, and traces are inspectable offline. |
+| 4 | Offline player | Fills, equity, citations, and traces are inspectable offline in a realtime-style replay. |
 | 5 | Eval Lab | Backtest results face baselines and harsher fill models. |
 
 <details>

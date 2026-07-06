@@ -10,10 +10,10 @@
       <path d="M2 2L10 6L2 10V2Z" fill="#67E8F9"/>
     </marker>
     <style>
-      .title { font: 800 26px "Segoe UI", Arial, sans-serif; fill: #F8FAFC; }
-      .label { font: 800 18px "Segoe UI", Arial, sans-serif; fill: #E2E8F0; }
-      .sub { font: 600 13px "Segoe UI", Arial, sans-serif; fill: #8CA3B8; }
-      .num { font: 800 34px "Consolas", "Segoe UI", monospace; fill: #34D399; }
+      .title { font: 800 30px "Segoe UI", Arial, sans-serif; fill: #F8FAFC; }
+      .label { font: 800 21px "Segoe UI", Arial, sans-serif; fill: #E2E8F0; }
+      .sub { font: 600 15px "Segoe UI", Arial, sans-serif; fill: #8CA3B8; }
+      .num { font: 800 38px "Consolas", "Segoe UI", monospace; fill: #34D399; }
       .card { fill: #081421; stroke: #2A5B85; stroke-width: 1.6; }
       .panel { fill: #0B1326; stroke: #67E8F9; stroke-opacity: .55; stroke-width: 1.8; }
     </style>

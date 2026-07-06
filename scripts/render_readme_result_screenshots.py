@@ -188,7 +188,7 @@ print(json.dumps(clean({
     'risk_variants': risk_variants,
     'param_variants': param_variants,
     'equity_curve': rep.equity_curve,
-    'fills': rep.fills[-12:],
+    'fills': rep.fills,
 }), ensure_ascii=False))
 """
     try:
