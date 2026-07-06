@@ -1,120 +1,195 @@
 <div align="center">
 
-<img src="docs/assets/alphaloom-logo-primary.png" alt="AlphaLoom" width="340">
+<img src="docs/assets/alphaloom-logo-primary.png" alt="AlphaLoom" width="300">
 
-# AlphaLoom · The graph **IS** the agent
+# AlphaLoom
 
-An agent-native quant trading platform where a strategy is not a code file — it's a visual **blueprint** (an Unreal-Engine-style node graph) that *compiles* into an executable, falsifiable trading agent.
+**The graph IS the agent.**
+
+An agent-native quant trading platform where `.loom` visual blueprints compile into typed, auditable, falsifiable trading agents.
 
 [![CI](https://github.com/ZhaoSH980/alphaloom/actions/workflows/ci.yml/badge.svg)](https://github.com/ZhaoSH980/alphaloom/actions/workflows/ci.yml)
-&nbsp;![tests](https://img.shields.io/badge/backend_tests-404_passing-2ea043?style=flat-square)
+&nbsp;![backend](https://img.shields.io/badge/backend-pytest-2ea043?style=flat-square)
 &nbsp;![frontend](https://img.shields.io/badge/frontend-tsc--strict_+_vitest-3178c6?style=flat-square)
-&nbsp;![offline](https://img.shields.io/badge/demo-offline_·_zero--quota-f59e0b?style=flat-square)
+&nbsp;![offline](https://img.shields.io/badge/demo-offline_zero--quota-f59e0b?style=flat-square)
 &nbsp;![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 
 <br>
 
-<img src="docs/assets/architecture.svg" alt="AlphaLoom architecture — a blueprint compiles into a trading agent, runs, is evaluated, and the LLM rewrites the graph in a compile-gated closed loop" width="100%">
+<img src="docs/assets/architecture.svg" alt="AlphaLoom compile-gated agent loop" width="100%">
+
+**Draw a trading graph. Compile the guardrails. Replay every decision. Score it against real market data.**
 
 </div>
 
-## Why it's different
+## Why This Exists
 
-General agent frameworks (LangChain, LangGraph, Langflow) orchestrate **conversation**, which has no ground truth. AlphaLoom compiles **falsifiable trading organisms**, where every decision is judged by realized market data. That difference lets the compiler *prove* things a conversation framework structurally cannot:
+Most agent frameworks orchestrate conversation. Conversation is flexible, but it rarely has ground truth.
 
-|   | |
-|---|---|
-| 🔒 **The type system is the compliance officer** | `ExecuteOrder` only accepts a `risk_stamped_signal` — a type that *only* a `RiskGate` node can produce. A graph that routes a raw signal to an order (or a Copilot/LLM that tries to synthesize one) **fails to compile**. Bypassing risk control isn't a policy you enforce; it's a sentence the language cannot express. |
-| 📜 **Static cost certificate** | The compiler walks the graph and tells you — *before you run it* — worst-case LLM calls per bar, the daily token ceiling, the worst-case latency class, and what fraction of the graph is deterministic. |
-| ⏳ **Causal typing** | Market-data pins carry an *as-of* timestamp; the runtime rejects any read of data later than the current bar. Look-ahead bias becomes a compiler-assisted, runtime-enforced error. |
-| 📊 **Honest evaluation, by design** | Five *falsifiable* evaluation tools (below) — AlphaLoom is a **methodology demonstration**, not a directly-deployable alpha. The honesty is the deliverable. |
-
-## See it
-
-**The graph *is* the agent.** A blueprint of typed nodes; the **cost certificate** (top-right) is computed *before* you run — 3 LLM calls/bar, 92.3% deterministic. The red **`risk_gate`** node is the only path into `execute_order`.
-
-<img src="docs/screenshots/studio.png" alt="Blueprint Studio: the agent_committee node graph with the cost certificate panel" width="100%">
-
-**Fidelity ladder — the backtest lie detector.** The *same* fills replayed under four fill models; net PnL degrades monotonically L0→L3, and the **optimism gap** is exactly how much rosier the naive backtest was than realistic fills. (Zero LLM calls — it re-matches existing fills.)
-
-<img src="docs/screenshots/fidelity.png" alt="Fidelity ladder L0 to L3 with the optimism gap highlighted" width="100%">
-
-**Honest scoring.** A blueprint scorecard that *refuses to trust in-sample numbers* (composite is driven by the held-out window, penalized for the fidelity gap, and zero-trades = zero-evidence), and a baseline leaderboard the agent has to earn its place above.
+AlphaLoom uses trading as a harder laboratory for agent engineering: every action has a timestamp, a fill model, a PnL, a drawdown, and an audit trail. The goal is not to ship a magic alpha. The goal is to show a complete agent system where the compiler, runtime, recorder, and evaluator make claims that can be checked.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/scorecard.png" alt="Blueprint scorecard with evidence coverage"></td>
-<td width="50%"><img src="docs/screenshots/leaderboard.png" alt="Baseline leaderboard: buy-hold, ema-default, random"></td>
+<td width="33%">
+<strong>Risk cannot be bypassed</strong><br>
+<code>ExecuteOrder</code> only accepts a <code>risk_stamped_signal</code>. Only <code>RiskGate</code> can produce that type. A graph that routes raw LLM output into an order fails before it can run.
+</td>
+<td width="33%">
+<strong>Cost is known before runtime</strong><br>
+The compiler emits a static certificate: worst-case LLM calls per bar, token ceiling, latency class, deterministic ratio, and risk-gate coverage.
+</td>
+<td width="33%">
+<strong>Evaluation is falsifiable</strong><br>
+Backtests, fidelity ladders, scorecards, ablations, baselines, and evolution runs all replay from recorded inputs instead of asking you to trust a screenshot.
+</td>
 </tr>
 </table>
 
-**Committee ablation — honest even when it's unflattering.** Three arms report the guardrail's value *with its sign either way*. In this window the risk officer **hurt** performance (net-blocked winners) — shown as-is, never spun.
+## Start In One Click
 
-<img src="docs/screenshots/ablation.png" alt="Committee ablation table showing guardrail value hurt, reported honestly" width="100%">
+Windows demo:
 
-**Evolution genealogy — the agent as researcher.** The LLM mutates the graph (compile-gated: a mutation that drops the risk stamp simply won't compile); survivors breed; the winner is scored on a **held-out** window. `repaired` nodes are ones whose first mutation failed to compile and self-repaired from the compiler's fix-hint.
+```bat
+START_ALPHALOOM.cmd
+```
 
-<img src="docs/screenshots/genealogy.png" alt="Evolution genealogy tree with a winner, survived and repaired nodes" width="100%">
+That command bootstraps the backend if needed, ensures the demo database exists, builds the frontend, starts the offline replay server, and opens:
 
-**Every decision is traceable.** RAG citations, and the reflection **four-quadrant** taxonomy that separates *reasonable-but-wrong* from *bad-process* — don't punish a sound decision for one bad outcome.
+```text
+http://127.0.0.1:8000/#/studio
+```
 
-<img src="docs/screenshots/terminal.png" alt="Terminal: committee run summary, RAG citations, reflection verdicts" width="100%">
+Manual Windows path:
 
-## What's inside
+```powershell
+# backend
+cd backend
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .[dev]
+
+# frontend
+cd ..\frontend
+npm install
+npm run build
+
+# one-process offline demo
+cd ..
+$env:ALPHALOOM_OFFLINE = "1"
+backend\.venv\Scripts\python.exe -m uvicorn alphaloom.serve:app --port 8000 --app-dir backend
+```
+
+No API key is required for the showcase. The committed replay database lets the Studio, Terminal, and Eval Lab run offline with zero quota.
+
+## 30-Second Demo Path
+
+| Step | What to show | Why it matters |
+|---|---|---|
+| 1 | Open **Studio** and load `agent_committee` | The agent is a typed graph, not hidden prompt glue. |
+| 2 | Point at `risk_gate -> execute_order` | Risk control is a compile-time language rule. |
+| 3 | Show the cost certificate | LLM cost and determinism are visible before a run starts. |
+| 4 | Run the offline replay | Committee decisions, fills, equity, citations, and reflection verdicts appear without network calls. |
+| 5 | Open **Eval Lab** | The same run is judged by fidelity, scorecard, baselines, ablation, and evolution genealogy. |
+| 6 | Show the real OKX smoke test | The graph can run on real historical candles, with caveats stated up front. |
+
+## Visual Tour
+
+**Blueprint Studio.** Typed pins, live compile feedback, cost certificate, and a graph where the red risk gate is the only legal path into execution.
+
+<img src="docs/screenshots/studio.png" alt="Blueprint Studio with a typed trading-agent graph and cost certificate" width="100%">
+
+**Fidelity ladder.** The same fills are replayed under stricter fill models. The optimism gap makes naive backtest assumptions visible.
+
+<img src="docs/screenshots/fidelity.png" alt="Fidelity ladder comparing L0 to L3 fill realism" width="100%">
+
+**Scorecard and baseline leaderboard.** AlphaLoom does not trust in-sample PnL by itself. Held-out performance, evidence coverage, and baseline ranking drive the score.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/scorecard.png" alt="Blueprint scorecard with held-out evidence"></td>
+<td width="50%"><img src="docs/screenshots/leaderboard.png" alt="Baseline leaderboard comparing the blueprint against simple strategies"></td>
+</tr>
+</table>
+
+**Committee ablation.** The risk officer is measured honestly. If the guardrail hurts the window, the UI says so.
+
+<img src="docs/screenshots/ablation.png" alt="Committee ablation table showing guardrail value" width="100%">
+
+**Evolution genealogy.** The LLM mutates blueprints, compile errors produce repair hints, survivors breed, and winners are judged on held-out data.
+
+<img src="docs/screenshots/genealogy.png" alt="Evolution genealogy tree for mutated trading blueprints" width="100%">
+
+**Terminal trace.** Every decision is inspectable: committee rationale, RAG citations, fills, reflection labels, and process/outcome separation.
+
+<img src="docs/screenshots/terminal.png" alt="Terminal trace with committee summary, RAG citations, fills, and reflection verdicts" width="100%">
+
+## Real Market Smoke Test
+
+The polished offline demo is deterministic, but AlphaLoom can also run the same compile-gated graph on public market data. A small OKX scan produced a cleaner README example than the original demo numbers:
+
+| Item | Value |
+|---|---|
+| Blueprint | [`blueprints/real_sol_breakout_demo.loom`](blueprints/real_sol_breakout_demo.loom) |
+| Market data | OKX public `SOL-USDT-SWAP` 1m candles |
+| Window | 2026-06-24 04:12Z to 2026-06-27 04:12Z |
+| Result | **+9.0439% return**, **8.2020% max drawdown** |
+| Trades | 93 trades, 50.54% win rate, profit factor 1.3774 |
+| Buy and hold | +4.0152% return, 8.5091% max drawdown |
+
+This is a smoke test, not an alpha claim. It is included because a showcase trading system should be able to demonstrate a real-data run, exact parameters, and honest caveats. See [`docs/real-data-smoke-test.md`](docs/real-data-smoke-test.md) for the download command, data range, blueprint parameters, and reproduction notes.
+
+## What Is Inside
 
 | Layer | What it does |
 |---|---|
-| **Blueprint compiler** | `.loom` JSON → typed node graph → topological plan + cost certificate. Type-checks pins, expands subgraphs, rejects illegal cycles, enforces the risk-stamp rule. |
-| **Event-driven engine** | Wave-based execution, deterministic replay, breakpoints + full I/O recording (the substrate for time-travel debugging). |
-| **Backtest + brokers** | Next-bar-open fill semantics (no look-ahead), attached stops, EOD settlement; paper broker (OKX-demo broker sketched). |
-| **Agent nodes** | `LLMAnalyst`, `Committee` (strategist → risk-officer → chair with **code-enforced veto**), `PADecisionTree` (deterministic numeric gate — "don't trust the LLM's mouth"), `KnowledgeRetrieve` (BM25 RAG, EN + 中文), `RequireCitations`, `Reflector` (process/outcome scoring), experience store by market-regime bucket. |
-| **Copilot** | Text-to-Blueprint: natural language → a compilable graph. **Compile-error self-repair**: a graph that fails to compile is repaired from the `CompileError` fix-hint (≤3 tries). Explain / Optimize. |
-| **Text-to-Node sandbox** | AST-whitelist compiler that hot-registers custom nodes; red-teamed against 40+ classic Python escapes; sandboxed nodes are stripped of the LLM handle and cannot forge the risk stamp. |
-| **Eval Lab** | Five offline-replayable tools: fidelity ladder · scorecard · baseline leaderboard · committee ablation · evolution genealogy. |
-| **Studio + Terminal (React)** | Drag-and-connect canvas with typed pins, live compile feedback, cost-certificate panel, run-time glow, breakpoint inspector; Terminal shows candles + fills, equity, committee traces, RAG citations, and reflection verdicts. |
+| Blueprint compiler | `.loom` JSON to typed node graph to topological plan plus cost certificate. It type-checks pins, expands subgraphs, rejects illegal cycles, and enforces the risk-stamp rule. |
+| Event runtime | Wave-based execution, deterministic replay, breakpoints, full node I/O recording, and time-travel-style inspection. |
+| Backtest engine | Next-bar-open fills, attached stops, end-of-day settlement, no look-ahead reads, and broker abstraction. |
+| Agent nodes | `LLMAnalyst`, `Committee`, deterministic gates, BM25 RAG, citation requirements, reflection scoring, and regime-bucketed experience memory. |
+| Copilot | Natural language to blueprint, compile-error self-repair, explanation, and optimization. |
+| Text-to-node sandbox | AST-whitelisted custom node compiler, red-teamed against Python escape patterns, with no access to the LLM handle and no ability to forge the risk stamp. |
+| Eval Lab | Fidelity ladder, scorecard, baseline leaderboard, committee ablation, and evolution genealogy. |
+| React Studio + Terminal | Drag-and-connect canvas, compile feedback, cost panel, runtime glow, breakpoint inspector, candles, fills, equity, citations, and reflection verdicts. |
 
-## Quick start (zero API key, zero quota)
+## Offline LLM Recordings
 
-```bash
-# backend
-cd backend && python -m venv .venv && .venv/Scripts/python -m pip install -e .[dev]
-# frontend
-cd ../frontend && npm install && npm run build
-# one-process offline demo  (Windows: demo.bat does all of this)
-cd .. && ALPHALOOM_OFFLINE=1 backend/.venv/Scripts/python -m uvicorn alphaloom.serve:app --port 8000 --app-dir backend
-# open http://localhost:8000  → Studio · Terminal · Eval Lab
-```
+Every LLM call goes through a record/replay layer. Requests are canonicalized and hashed; cache hits make the showcase deterministic and network-free.
 
-Run the `agent_committee` blueprint in the Studio: it replays **committed LLM recordings** with **zero network calls** — 301 bars, 150 trades, committee decisions, and reflection verdicts across all four quadrants, instantly. In the **Eval Lab**, click each panel's **"▶ Run offline demo"** to replay the ablation and evolution recordings offline.
+`ALPHALOOM_OFFLINE=1` replays the committed `data/llm_calls.sqlite` database:
 
-## On the LLM recordings (honest framing)
+1. **835 deterministic seed responses** using `model: spark-x1`. These are valid-shaped synthetic responses for a rich reproducible demo: varied committee decisions, risk-officer vetoes, all four reflection quadrants, Copilot compile-error repair, ablation, and evolution.
+2. **123 real iFlytek Spark `astron-code-latest` calls** from a recorded 40-bar `agent_committee` run. That real window traded conservatively, which is preserved as-is rather than curated into a prettier story.
 
-Every LLM call goes through a **record/replay layer** (ported from Hindsight): each request is canonicalized and hashed; a cache hit means no network. `ALPHALOOM_OFFLINE=1` replays committed recordings so the demo runs anywhere, offline, at zero quota. The committed `data/llm_calls.sqlite` has **two clearly-distinguished sources**:
+To run live, place `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` in a repo-root `.env` file and run without `ALPHALOOM_OFFLINE`.
 
-1. **835 deterministic seed responses** (`model: spark-x1`) — hand-authored, valid-shaped canned responses driving a *rich, reproducible* demo: varied committee decisions, risk-officer vetoes, all four reflection quadrants, a Copilot compile-error self-repair, plus the three-arm ablation and the small-scale evolution lab so every Eval Lab panel renders offline. **These are synthetic, not real LLM output** — regenerate them with `scripts/seed_recordings.py`. The demo coordinates live in `backend/alphaloom/eval/demo_coords.py`, which both the seed script and the API import, so they can never drift.
-2. **123 real 讯飞 (iFlytek Spark) `astron-code-latest` calls** — genuine recorded responses from a 40-bar `agent_committee` run against the real endpoint, offline-verified to replay at **123 hits / 0 miss**. In that window the real committee traded conservatively (all flat/hold) — authentic behavior, not curated. This proves the pipeline works against a real LLM.
+## Safety And Tests
 
-To run live or record your own: put `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` in a repo-root `.env` (never committed) and run without `ALPHALOOM_OFFLINE`. 429 backoff is built in.
-
-## Testing & safety
-
-- **404 backend tests** (pytest), frontend tsc-strict + vitest. CI runs both offline/deterministically — no real LLM, zero quota.
-- Reviewed task-by-task by an independent adversarial reviewer; a red-team pass on the sandbox tried 40+ classic escapes (dunder chains, format-string dunder, metaclass hooks, import bypass, private-slot reach-back) — all blocked. Sandboxed nodes are stripped of the LLM handle (a `WeakKeyDictionary`-backed restricted context), so a custom node **cannot** quietly burn your API quota — the same "compliance officer" principle as the risk stamp.
-- No secrets in the repo or its history; `.env` is git-ignored and was never committed.
+- Backend pytest suite and frontend `tsc --strict` plus vitest are covered by CI.
+- Offline tests do not call real LLM endpoints or spend quota.
+- The text-to-node sandbox was red-teamed against common Python escape patterns.
+- Sandboxed nodes are stripped of the LLM handle and cannot forge the risk stamp.
+- Secrets are kept out of the repo; `.env` is ignored.
 
 ## Documentation
 
-- [`docs/evaluation-methodology.md`](docs/evaluation-methodology.md) — what each evaluation tool measures, what it does **not**, and exactly where it stops being trustworthy (single synthetic instrument, small windows, N=1 causal claims, synthetic-seed vs. real-LLM recordings). The capstone of the honest-evaluation brand.
-- [`docs/demo-script.md`](docs/demo-script.md) — a 10-minute offline talk track, each step mapped to a JD capability.
-- [`docs/future-work.md`](docs/future-work.md) — known boundaries and roadmap.
-- `docs/superpowers/` — the design spec, per-day plans, and per-task adversarial review trail.
+- [`docs/demo-script.md`](docs/demo-script.md) - a 10-minute offline talk track for presenting AlphaLoom.
+- [`docs/evaluation-methodology.md`](docs/evaluation-methodology.md) - what each evaluation tool measures, where it stops being trustworthy, and how to read the caveats.
+- [`docs/real-data-smoke-test.md`](docs/real-data-smoke-test.md) - the real OKX data run, exact window, parameters, and reproduction notes.
+- [`docs/future-work.md`](docs/future-work.md) - known boundaries and roadmap.
+- [`docs/superpowers/`](docs/superpowers/) - design spec, per-day plans, and adversarial review trail.
 
 ## Status
 
-**Complete** — D1 (graph core / compiler / engine / backtest) · D2 (API/WS + Studio + Terminal) · D3 (LLM nodes / Copilot / reflection / recordings) · D4 (evaluation suite: fidelity ladder, scorecard, baseline leaderboard, committee ablation, evolution lab + genealogy). Tagged `d1-complete` → `d4-complete`; every task passed a two-stage adversarial review plus a live browser walkthrough.
+Complete showcase build:
+
+- D1: graph core, compiler, engine, backtest
+- D2: API, WebSocket events, Studio, Terminal
+- D3: LLM nodes, Copilot, reflection, recordings
+- D4: fidelity ladder, scorecard, baseline leaderboard, committee ablation, evolution lab, genealogy
+
+AlphaLoom is best read as an engineering demo for agent safety, observability, and evaluation. The trading environment gives the agent something unusually useful for a demo: consequences.
 
 <div align="center">
 
-**MIT © 2026 Zhao Chenghao**
+**MIT (c) 2026 Zhao Chenghao**
 
 </div>
