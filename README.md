@@ -6,6 +6,7 @@
 
 An agent-native quant trading platform where a strategy is not a code file — it's a visual **blueprint** (an Unreal-Engine-style node graph) that *compiles* into an executable, falsifiable trading agent.
 
+[![CI](https://github.com/ZhaoSH980/alphaloom/actions/workflows/ci.yml/badge.svg)](https://github.com/ZhaoSH980/alphaloom/actions/workflows/ci.yml)
 ![tests](https://img.shields.io/badge/backend_tests-404_passing-2ea043?style=flat-square)
 ![frontend](https://img.shields.io/badge/frontend-tsc--strict_+_vitest-3178c6?style=flat-square)
 ![offline](https://img.shields.io/badge/demo-offline_·_zero--quota-f59e0b?style=flat-square)
