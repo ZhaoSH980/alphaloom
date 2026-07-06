@@ -1,0 +1,47 @@
+<svg width="1120" height="360" viewBox="0 0 1120 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AlphaLoom record replay loop</title>
+  <desc id="desc">LLM calls are canonicalized, hashed, recorded, and replayed offline with zero quota.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1120" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#061014"/>
+      <stop offset="1" stop-color="#101528"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto">
+      <path d="M2 2L10 6L2 10V2Z" fill="#67E8F9"/>
+    </marker>
+    <style>
+      .title { font: 800 26px "Segoe UI", Arial, sans-serif; fill: #F8FAFC; }
+      .label { font: 800 18px "Segoe UI", Arial, sans-serif; fill: #E2E8F0; }
+      .sub { font: 600 13px "Segoe UI", Arial, sans-serif; fill: #8CA3B8; }
+      .num { font: 800 28px "Consolas", "Segoe UI", monospace; fill: #34D399; }
+      .card { fill: #081421; stroke: #2A5B85; stroke-width: 1.6; }
+      .cache { fill: #08281F; stroke: #34D399; stroke-width: 2; }
+    </style>
+  </defs>
+  <rect width="1120" height="360" rx="24" fill="url(#bg)"/>
+  <text x="44" y="52" class="title">Offline replay, zero quota</text>
+  <text x="44" y="78" class="sub">Agent nodes can use LLMs live, then replay the exact calls deterministically for demos and tests.</text>
+
+  <rect class="card" x="60" y="136" width="180" height="92" rx="16"/>
+  <text x="94" y="172" class="label">LLM node</text>
+  <text x="94" y="201" class="sub">committee / copilot</text>
+
+  <path d="M240 182H318" stroke="#67E8F9" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect class="card" x="320" y="136" width="210" height="92" rx="16"/>
+  <text x="354" y="172" class="label">Canonical hash</text>
+  <text x="354" y="201" class="sub">request -> stable key</text>
+
+  <path d="M530 182H608" stroke="#67E8F9" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect class="cache" x="610" y="112" width="220" height="140" rx="18"/>
+  <text x="648" y="157" class="label">Replay DB</text>
+  <text x="648" y="193" class="num">958 calls</text>
+  <text x="648" y="222" class="sub">seed + real recordings</text>
+
+  <path d="M830 182H908" stroke="#67E8F9" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect class="card" x="910" y="136" width="160" height="92" rx="16"/>
+  <text x="940" y="172" class="label">Demo</text>
+  <text x="940" y="201" class="sub">0 network calls</text>
+
+  <path d="M990 252C890 315 680 314 458 280C284 253 165 283 134 232" stroke="#34D399" stroke-width="2.4" stroke-dasharray="8 8"/>
+  <text x="404" y="313" class="sub" fill="#A7F3D0">same prompts, same responses, same trace</text>
+</svg>

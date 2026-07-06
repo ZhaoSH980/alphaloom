@@ -31,9 +31,9 @@ Instrument/window:
 |---|---|
 | Instrument | `SOL-USDT-SWAP` |
 | Bar | `1m` |
-| Start | 2026-06-24 04:12Z |
-| End | 2026-06-27 04:12Z |
-| Bars | 4,321 |
+| Start | 2026-06-25 04:12Z |
+| End | 2026-06-26 04:12Z |
+| Bars | 1,441 |
 
 Parameters:
 
@@ -49,14 +49,14 @@ Backtest result with `initial_cash=10000` and `fee_rate=0.0005`:
 
 | Metric | Result |
 |---|---:|
-| Net PnL | 904.3905602 |
-| Return | 9.0439% |
-| Max drawdown | 8.2020% |
-| Trades | 93 |
-| Win rate | 50.54% |
-| Profit factor | 1.3774 |
+| Net PnL | 946.46408889 |
+| Return | 9.4646% |
+| Max drawdown | 2.7693% |
+| Trades | 29 |
+| Win rate | 68.97% |
+| Profit factor | 3.0025 |
 
-Buy-and-hold on the same SOL window returned 4.0152% with 8.5091% max drawdown. So this is a useful demo window: the graph makes money, beats buy-and-hold in this slice, and still goes through the same `RiskGate -> ExecuteOrder` typed compliance path.
+Buy-and-hold on the same SOL window returned 0.4761% with 7.6801% max drawdown. The fidelity ladder on this window is also cleaner for README screenshots: L0 +1006.5746, L1 +946.4641, L2 +423.2728, and L3 +148.6884 after the harshest fill model. So this is a useful demo window: the graph makes money, beats buy-and-hold in this slice, survives the L3 fill model, and still goes through the same `RiskGate -> ExecuteOrder` typed compliance path.
 
 ## Caveat
 

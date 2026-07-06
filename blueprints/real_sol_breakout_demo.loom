@@ -22,9 +22,9 @@
   ],
   "meta": {
     "preset": true,
-    "description": "Real-data smoke-test blueprint selected from an OKX public 1m SOL-USDT-SWAP scan. Demo window: 2026-06-24 04:12Z to 2026-06-27 04:12Z.",
+    "description": "Real-data smoke-test blueprint selected from an OKX public 1m SOL-USDT-SWAP scan. Demo window: 2026-06-25 04:12Z to 2026-06-26 04:12Z.",
     "data_source": "OKX public REST history-candles",
-    "demo_start_ms": 1782274320000,
-    "demo_end_ms": 1782533520000
+    "demo_start_ms": 1782360720000,
+    "demo_end_ms": 1782447120000
   }
 }

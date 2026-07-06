@@ -1,0 +1,45 @@
+<svg width="1120" height="360" viewBox="0 0 1120 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AlphaLoom compile cost certificate</title>
+  <desc id="desc">The compiler emits cost, latency, determinism, and risk coverage before runtime.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1120" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07111A"/>
+      <stop offset="1" stop-color="#081827"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto">
+      <path d="M2 2L10 6L2 10V2Z" fill="#67E8F9"/>
+    </marker>
+    <style>
+      .title { font: 800 26px "Segoe UI", Arial, sans-serif; fill: #F8FAFC; }
+      .label { font: 800 18px "Segoe UI", Arial, sans-serif; fill: #E2E8F0; }
+      .sub { font: 600 13px "Segoe UI", Arial, sans-serif; fill: #8CA3B8; }
+      .num { font: 800 34px "Consolas", "Segoe UI", monospace; fill: #34D399; }
+      .card { fill: #081421; stroke: #2A5B85; stroke-width: 1.6; }
+      .panel { fill: #0B1326; stroke: #67E8F9; stroke-opacity: .55; stroke-width: 1.8; }
+    </style>
+  </defs>
+  <rect width="1120" height="360" rx="24" fill="url(#bg)"/>
+  <text x="44" y="52" class="title">Static cost certificate</text>
+  <text x="44" y="78" class="sub">The graph is priced and classified before a single bar or LLM call runs.</text>
+
+  <rect class="card" x="64" y="134" width="255" height="104" rx="16"/>
+  <text x="94" y="172" class="label">.loom blueprint</text>
+  <text x="94" y="202" class="sub">nodes, typed pins, edges</text>
+
+  <path d="M320 186H416" stroke="#67E8F9" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect class="card" x="418" y="118" width="230" height="136" rx="18"/>
+  <text x="462" y="163" class="label">Compiler</text>
+  <text x="462" y="194" class="sub">typecheck + topo sort</text>
+  <text x="462" y="220" class="sub">risk path + cost walk</text>
+
+  <path d="M650 186H742" stroke="#67E8F9" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect class="panel" x="744" y="72" width="320" height="224" rx="20"/>
+  <text x="780" y="113" class="label">certificate</text>
+  <text x="780" y="156" class="sub">LLM calls / bar</text>
+  <text x="970" y="157" class="num" text-anchor="end">0</text>
+  <text x="780" y="198" class="sub">daily token ceiling</text>
+  <text x="970" y="199" class="num" text-anchor="end">0</text>
+  <text x="780" y="240" class="sub">deterministic ratio</text>
+  <text x="970" y="241" class="num" text-anchor="end">100%</text>
+  <text x="780" y="276" class="sub">latency class: fast</text>
+</svg>

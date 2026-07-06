@@ -1,0 +1,53 @@
+<svg width="1120" height="360" viewBox="0 0 1120 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AlphaLoom eval lab</title>
+  <desc id="desc">AlphaLoom evaluates a blueprint through real data, fidelity, baselines, risk sensitivity, and evolution.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1120" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07111A"/>
+      <stop offset="1" stop-color="#0C1724"/>
+    </linearGradient>
+    <style>
+      .title { font: 800 26px "Segoe UI", Arial, sans-serif; fill: #F8FAFC; }
+      .label { font: 800 17px "Segoe UI", Arial, sans-serif; fill: #E2E8F0; }
+      .sub { font: 600 13px "Segoe UI", Arial, sans-serif; fill: #8CA3B8; }
+      .num { font: 800 30px "Consolas", "Segoe UI", monospace; fill: #34D399; }
+      .card { fill: #081421; stroke: #2A5B85; stroke-width: 1.5; }
+    </style>
+  </defs>
+  <rect width="1120" height="360" rx="24" fill="url(#bg)"/>
+  <text x="44" y="52" class="title">Falsifiable evaluation stack</text>
+  <text x="44" y="78" class="sub">The blueprint is judged by replayable market evidence, not by a persuasive prompt transcript.</text>
+
+  <rect class="card" x="56" y="124" width="190" height="128" rx="18"/>
+  <text x="84" y="158" class="label">Real OKX smoke</text>
+  <text x="84" y="198" class="num">+9.46%</text>
+  <text x="84" y="226" class="sub">SOL 1m, one day</text>
+
+  <rect class="card" x="272" y="124" width="190" height="128" rx="18"/>
+  <text x="300" y="158" class="label">Fidelity L3</text>
+  <text x="300" y="198" class="num">+148.69</text>
+  <text x="300" y="226" class="sub">fees + slippage</text>
+
+  <rect class="card" x="488" y="124" width="190" height="128" rx="18"/>
+  <text x="516" y="158" class="label">Leaderboard</text>
+  <text x="516" y="198" class="num">#1</text>
+  <text x="516" y="226" class="sub">beats buy-hold</text>
+
+  <rect class="card" x="704" y="124" width="190" height="128" rx="18"/>
+  <text x="732" y="158" class="label">Risk sensitivity</text>
+  <text x="732" y="198" class="num">2.77%</text>
+  <text x="732" y="226" class="sub">base max DD</text>
+
+  <rect class="card" x="920" y="124" width="150" height="128" rx="18"/>
+  <text x="948" y="158" class="label">Evolution</text>
+  <text x="948" y="198" class="num">+19.83%</text>
+  <text x="948" y="226" class="sub">param variant</text>
+
+  <path d="M74 284H1046" stroke="#233A5D" stroke-width="2"/>
+  <circle cx="151" cy="284" r="7" fill="#34D399"/>
+  <circle cx="367" cy="284" r="7" fill="#34D399"/>
+  <circle cx="583" cy="284" r="7" fill="#34D399"/>
+  <circle cx="799" cy="284" r="7" fill="#34D399"/>
+  <circle cx="995" cy="284" r="7" fill="#FACC15"/>
+  <text x="322" y="322" class="sub" fill="#A7F3D0">smoke-test evidence is shown with caveats; it is not an alpha claim</text>
+</svg>
