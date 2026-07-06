@@ -8,6 +8,7 @@ __pycache__/
 .hypothesis/
 data/*.sqlite
 !data/llm_calls.sqlite
+!data/demo.sqlite
 backend/data/
 runs/
 blueprints/user/
