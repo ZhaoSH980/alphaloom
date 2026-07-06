@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+.pytest_cache_local/
+.tmp_pytest/
 .hypothesis/
 data/*.sqlite
 !data/llm_calls.sqlite
