@@ -14,7 +14,7 @@ export default function LeaderboardTable({ board }: { board: Board }) {
   if (!rows.length) return <div className="text-xs text-slate-500">{t("noData")}</div>;
 
   return (
-    <div className="panel p-3 space-y-2">
+    <div className="panel hud-frame p-3 space-y-2">
       <div className="flex items-baseline gap-3 flex-wrap">
         <div className="hud-label text-loom-green">{t("leaderboardTitle")}</div>
         <span className="text-[10px] text-slate-500">{t("leaderboardHint")}</span>

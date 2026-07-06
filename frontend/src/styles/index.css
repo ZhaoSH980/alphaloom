@@ -2,13 +2,112 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
-body { background: radial-gradient(1200px 800px at 70% -10%, #101a33 0%, #060913 55%); }
+:root {
+  color-scheme: dark;
+  --grid: rgba(56, 189, 248, 0.045);
+}
 
-.panel { @apply bg-panel/90 border border-edge rounded-lg; }
-.hud-label { @apply text-[10px] uppercase tracking-[0.2em] text-slate-500; }
-.node-glow { box-shadow: 0 0 14px 3px rgba(56, 189, 248, 0.6); }
-.node-blocked { box-shadow: 0 0 14px 3px rgba(239, 68, 68, 0.7); }
+html, body, #root { height: 100%; }
+
+body {
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  color: #c7d2e4;
+  background: #050810;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── atmosphere · glow blooms ─────────────────────────────── */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -3; pointer-events: none;
+  background:
+    radial-gradient(920px 620px at 80% -10%, rgba(56, 189, 248, 0.15), transparent 60%),
+    radial-gradient(760px 520px at 8% 6%, rgba(167, 139, 250, 0.11), transparent 60%),
+    radial-gradient(1100px 760px at 50% 118%, rgba(245, 166, 35, 0.07), transparent 62%),
+    #050810;
+}
+/* ── atmosphere · living grid, slow drift, faded by a radial mask ── */
+body::after {
+  content: "";
+  position: fixed; inset: -2px; z-index: -2; pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(125% 95% at 50% -5%, #000 0%, transparent 78%);
+          mask-image: radial-gradient(125% 95% at 50% -5%, #000 0%, transparent 78%);
+  animation: griddrift 20s linear infinite;
+}
+@keyframes griddrift { to { background-position: 0 46px, 46px 0; } }
+
+/* ── HUD primitives ───────────────────────────────────────── */
+.panel {
+  position: relative;
+  background: linear-gradient(180deg, rgba(13, 20, 40, 0.9), rgba(8, 13, 27, 0.92));
+  border: 1px solid #1b2742;
+  border-radius: 10px;
+  backdrop-filter: blur(3px);
+}
+
+.hud-label {
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #647aa0;
+}
+
+/* corner brackets — the mission-control frame */
+.hud-frame::before,
+.hud-frame::after {
+  content: "";
+  position: absolute;
+  width: 12px; height: 12px;
+  border-color: rgba(56, 189, 248, 0.55);
+  border-style: solid;
+  pointer-events: none;
+}
+.hud-frame::before { top: 6px; left: 6px; border-width: 1.5px 0 0 1.5px; }
+.hud-frame::after  { bottom: 6px; right: 6px; border-width: 0 1.5px 1.5px 0; }
+
+/* animated accent line that sweeps light across a bar */
+.sweep-line { position: relative; overflow: hidden; }
+.sweep-line::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; width: 33%;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.5), transparent);
+  animation: sweep 2.8s linear infinite;
+}
+@keyframes sweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(420%); } }
+
+/* boot-up staggered reveal for page content */
+.boot { animation: boot 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes boot { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* type-signal glows (kept, sharpened) */
+.node-glow    { box-shadow: 0 0 16px 3px rgba(56, 189, 248, 0.6); }
+.node-blocked { box-shadow: 0 0 16px 3px rgba(242, 85, 90, 0.7); }
+
+/* tabular figures for all mono data (financial alignment) */
+.font-mono { font-variant-numeric: tabular-nums; }
+
+/* live status dot */
+.live-dot {
+  width: 7px; height: 7px; border-radius: 999px; background: #34d399;
+  box-shadow: 0 0 8px 1px rgba(52, 211, 153, 0.8);
+  animation: flicker 2.4s ease-in-out infinite;
+}
+@keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+/* ── custom scrollbars (instrument feel) ──────────────────── */
+* { scrollbar-width: thin; scrollbar-color: #24406e transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #1d3357; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: #2c4d80; background-clip: padding-box; }
+
 @media (prefers-reduced-motion: reduce) {
-  .node-glow, .node-blocked { transition: none; }
+  body::after, .sweep-line::after, .boot, .live-dot { animation: none; }
+  .boot { opacity: 1; transform: none; }
 }

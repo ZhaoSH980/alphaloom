@@ -11,7 +11,7 @@ export default function CertPanel({ cert }: { cert: Record<string, unknown> | nu
   );
   const det = Number(cert.deterministic_ratio ?? 1);
   return (
-    <div className="panel p-3">
+    <div className="panel hud-frame p-3">
       <div className="hud-label text-loom-gold mb-1">{t("cost")}</div>
       {item("llm calls/bar", cert.llm_calls_per_bar)}
       {item("daily token ceiling", Number(cert.daily_token_ceiling).toLocaleString())}

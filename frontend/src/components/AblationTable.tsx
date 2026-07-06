@@ -19,7 +19,7 @@ export default function AblationTable({ report }: { report: AblationReport }) {
   const gv = report.guardrail_value;
 
   return (
-    <div className="panel p-3 space-y-3">
+    <div className="panel hud-frame p-3 space-y-3">
       <div className="flex items-baseline gap-3 flex-wrap">
         <div className="hud-label text-loom-red">{t("ablationTitle")}</div>
         <span className="text-[10px] text-slate-500">{t("ablationHint")}</span>

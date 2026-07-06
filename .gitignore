@@ -17,3 +17,9 @@ blueprints/user/
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
+
+# logo working candidates — only the chosen primary is committed
+docs/assets/logo-archive/
+docs/assets/*-batch-*.png
+docs/assets/alphaloom-logo-v2.png
+docs/assets/alphaloom-logo.png

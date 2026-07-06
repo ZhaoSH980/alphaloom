@@ -28,7 +28,7 @@ export default function ScorecardPanel({ card }: { card: Scorecard }) {
   const comp = card.composite ?? 0;
 
   return (
-    <div className="panel p-3 space-y-3">
+    <div className="panel hud-frame p-3 space-y-3">
       <div className="hud-label text-loom-violet">{t("scorecardTitle")}</div>
 
       <div className="flex items-center gap-4 flex-wrap">

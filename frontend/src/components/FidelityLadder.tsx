@@ -28,7 +28,7 @@ export default function FidelityLadder({ report }: { report: LadderReport }) {
   const fmt = (n: number) => (Number.isFinite(n) ? +n.toFixed(2) : "—");
 
   return (
-    <div className="panel p-3 space-y-2">
+    <div className="panel hud-frame p-3 space-y-2">
       <div className="flex items-baseline gap-3 flex-wrap">
         <div className="hud-label text-loom-blue">{t("fidelityTitle")}</div>
         <span className="text-[10px] text-slate-500">{t("fidelityHint")}</span>

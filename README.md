@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🧬 AlphaLoom
+<img src="docs/assets/alphaloom-logo-primary.png" alt="AlphaLoom" width="340">
 
-### The graph **IS** the agent.
+# AlphaLoom · The graph **IS** the agent
 
 An agent-native quant trading platform where a strategy is not a code file — it's a visual **blueprint** (an Unreal-Engine-style node graph) that *compiles* into an executable, falsifiable trading agent.
 

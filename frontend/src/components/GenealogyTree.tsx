@@ -102,7 +102,7 @@ export default function GenealogyTree({ genealogy }: { genealogy: Genealogy }) {
     : NaN;
 
   return (
-    <div className="panel p-3 space-y-2">
+    <div className="panel hud-frame p-3 space-y-2">
       <div className="flex items-baseline gap-3 flex-wrap">
         <div className="hud-label text-loom-violet">{t("evolutionTitle")}</div>
         <span className="text-[10px] text-slate-500">{t("evolutionHint")}</span>
