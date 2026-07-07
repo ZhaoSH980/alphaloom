@@ -15,8 +15,13 @@ OUT = (
     else ROOT / "docs" / "assets" / "architecture-loop.gif"
 )
 
-W, H = 1000, 384
-SCALE = 2
+BASE_W, BASE_H = 1000, 384
+OUT_W, OUT_H = 1600, 614
+AA_SCALE = 2
+W, H = OUT_W * AA_SCALE, OUT_H * AA_SCALE
+X_SCALE = W / BASE_W
+Y_SCALE = H / BASE_H
+AVG_SCALE = (X_SCALE + Y_SCALE) / 2
 FRAME_COUNT = 72
 FRAME_MS = 70
 
@@ -41,10 +46,31 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.Im
     return ImageFont.load_default()
 
 
-FONT_TITLE = font(21, True)
-FONT_SUB = font(12)
-FONT_LABEL = font(17, True)
-FONT_TINY = font(10, True)
+FONT_TITLE = font(round(21 * AVG_SCALE), True)
+FONT_SUB = font(round(12 * AVG_SCALE))
+FONT_LABEL = font(round(17 * AVG_SCALE), True)
+FONT_TINY = font(round(10 * AVG_SCALE), True)
+
+
+def sc(value: float) -> int:
+    return max(1, round(value * AVG_SCALE))
+
+
+def xy(point: tuple[float, float]) -> tuple[float, float]:
+    return point[0] * X_SCALE, point[1] * Y_SCALE
+
+
+def points_xy(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    return [xy(point) for point in points]
+
+
+def rect_xy(rect: tuple[int, int, int, int]) -> tuple[float, float, float, float]:
+    x, y, w, h = rect
+    return x * X_SCALE, y * Y_SCALE, (x + w) * X_SCALE, (y + h) * Y_SCALE
+
+
+def box_xy(cx: float, cy: float, r: float) -> tuple[float, float, float, float]:
+    return (cx - r) * X_SCALE, (cy - r) * Y_SCALE, (cx + r) * X_SCALE, (cy + r) * Y_SCALE
 
 
 def lerp(a: float, b: float, t: float) -> float:
@@ -212,20 +238,24 @@ def distance_to_segment(p: tuple[float, float], a: tuple[float, float], b: tuple
 
 
 def draw_glow(draw_img: Image.Image, rect: tuple[int, int, int, int], color: tuple[int, int, int], alpha: int) -> None:
-    x, y, w, h = rect
+    x1, y1, x2, y2 = rect_xy(rect)
     layer = Image.new("RGBA", draw_img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    d.rounded_rectangle((x - 4, y - 4, x + w + 4, y + h + 4), radius=18, fill=(*color, alpha))
-    layer = layer.filter(ImageFilter.GaussianBlur(12))
+    pad = sc(4)
+    d.rounded_rectangle((x1 - pad, y1 - pad, x2 + pad, y2 + pad), radius=sc(18), fill=(*color, alpha))
+    layer = layer.filter(ImageFilter.GaussianBlur(sc(12)))
     draw_img.alpha_composite(layer)
 
 
 def draw_arrow(draw: ImageDraw.ImageDraw, a: tuple[float, float], b: tuple[float, float], color, width: int = 2) -> None:
-    draw.line((a, b), fill=color, width=width)
-    angle = math.atan2(b[1] - a[1], b[0] - a[0])
-    tip = b
-    left = (tip[0] - 9 * math.cos(angle - 0.45), tip[1] - 9 * math.sin(angle - 0.45))
-    right = (tip[0] - 9 * math.cos(angle + 0.45), tip[1] - 9 * math.sin(angle + 0.45))
+    pa = xy(a)
+    pb = xy(b)
+    draw.line((pa, pb), fill=color, width=sc(width))
+    angle = math.atan2(pb[1] - pa[1], pb[0] - pa[0])
+    tip = pb
+    head = sc(9)
+    left = (tip[0] - head * math.cos(angle - 0.45), tip[1] - head * math.sin(angle - 0.45))
+    right = (tip[0] - head * math.cos(angle + 0.45), tip[1] - head * math.sin(angle + 0.45))
     draw.polygon([tip, left, right], fill=color)
 
 
@@ -236,19 +266,19 @@ def draw_frame(frame: int) -> Image.Image:
 
     # Soft market-like contour lines.
     draw.line(
-        [(34, 338), (160, 300 + 8 * math.sin(progress * 6)), (315, 315), (510, 292), (765, 305), (960, 264)],
+        points_xy([(34, 338), (160, 300 + 8 * math.sin(progress * 6)), (315, 315), (510, 292), (765, 305), (960, 264)]),
         fill=(20, 61, 53, 160),
-        width=2,
+        width=sc(2),
     )
     draw.line(
-        [(42, 77), (158, 48), (300, 64), (490, 45), (724, 55), (965, 37)],
+        points_xy([(42, 77), (158, 48), (300, 64), (490, 45), (724, 55), (965, 37)]),
         fill=(18, 61, 75, 150),
-        width=2,
+        width=sc(2),
     )
-    draw.text((48, 23), TEXT["title_1"], fill="#F8FAFC", font=FONT_TITLE)
-    draw.text((48, 48), TEXT["title_2"], fill="#F8FAFC", font=FONT_TITLE)
+    draw.text(xy((48, 23)), TEXT["title_1"], fill="#F8FAFC", font=FONT_TITLE)
+    draw.text(xy((48, 48)), TEXT["title_2"], fill="#F8FAFC", font=FONT_TITLE)
     draw.text(
-        (48, 78),
+        xy((48, 78)),
         TEXT["subtitle"],
         fill="#9FB4C0",
         font=FONT_SUB,
@@ -268,33 +298,33 @@ def draw_frame(frame: int) -> Image.Image:
         outline = "#7DD3FC"
         outline_alpha = 255 if active else 98
         draw.rounded_rectangle(
-            (x, y, x + w, y + h),
-            radius=14,
+            rect_xy(rect),
+            radius=sc(14),
             fill=fill,
             outline=outline,
-            width=3 if active else 1,
+            width=sc(3 if active else 1),
         )
         if not active:
             overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            ImageDraw.Draw(overlay).rounded_rectangle((x, y, x + w, y + h), radius=14, fill=(0, 0, 0, 28))
+            ImageDraw.Draw(overlay).rounded_rectangle(rect_xy(rect), radius=sc(14), fill=(0, 0, 0, 28))
             img.alpha_composite(overlay)
         # Re-draw outline after dim overlay.
         draw = ImageDraw.Draw(img)
         draw.rounded_rectangle(
-            (x, y, x + w, y + h),
-            radius=14,
+            rect_xy(rect),
+            radius=sc(14),
             outline=(125, 211, 252, outline_alpha),
-            width=3 if active else 1,
+            width=sc(3 if active else 1),
         )
         text_y = y + 28 if line2 else y + 39
-        draw.text((x + 19, text_y), line1, fill="#F8FAFC", font=FONT_LABEL)
+        draw.text(xy((x + 19, text_y)), line1, fill="#F8FAFC", font=FONT_LABEL)
         if line2:
-            draw.text((x + 19, y + 51), line2, fill="#F8FAFC", font=FONT_LABEL)
+            draw.text(xy((x + 19, y + 51)), line2, fill="#F8FAFC", font=FONT_LABEL)
         if kind == "risk":
-            draw.text((x + 14, y + 67), TEXT["risk_line_1"], fill="#FDE68A", font=FONT_TINY)
-            draw.text((x + 14, y + 81), TEXT["risk_line_2"], fill="#B6A56E", font=FONT_SUB)
+            draw.text(xy((x + 14, y + 67)), TEXT["risk_line_1"], fill="#FDE68A", font=FONT_TINY)
+            draw.text(xy((x + 14, y + 81)), TEXT["risk_line_2"], fill="#B6A56E", font=FONT_SUB)
         else:
-            draw.text((x + 14, y + 77), sub, fill="#9FB4C0", font=FONT_SUB)
+            draw.text(xy((x + 14, y + 77)), sub, fill="#9FB4C0", font=FONT_SUB)
 
     centers = [center(c[4]) for c in CARDS]
     for i in range(len(CARDS) - 1):
@@ -315,9 +345,9 @@ def draw_frame(frame: int) -> Image.Image:
     on_loop = active_idx is None and point[1] > 224
     loop_color = (118, 228, 247, 210) if on_loop else (80, 112, 120, 95)
     for a, b in zip(loop, loop[1:]):
-        draw.line((a, b), fill=loop_color, width=2)
+        draw.line((xy(a), xy(b)), fill=loop_color, width=sc(2))
     draw.text(
-        (382, 282),
+        xy((382, 282)),
         TEXT["loop_note"],
         fill=(182, 243, 238, 205),
         font=FONT_TINY,
@@ -331,23 +361,23 @@ def draw_frame(frame: int) -> Image.Image:
         alpha = int(20 + 140 * (k / max(len(trail) - 1, 1)))
         r = int(2 + 4 * (k / max(len(trail) - 1, 1)))
         draw.ellipse(
-            (trail_point[0] - r, trail_point[1] - r, trail_point[0] + r, trail_point[1] + r),
+            box_xy(trail_point[0], trail_point[1], r),
             fill=(48, 231, 213, alpha),
         )
-    draw.ellipse((point[0] - 8, point[1] - 8, point[0] + 8, point[1] + 8), fill=(250, 204, 21, 245))
-    draw.ellipse((point[0] - 3, point[1] - 3, point[0] + 3, point[1] + 3), fill=(255, 255, 255, 250))
+    draw.ellipse(box_xy(point[0], point[1], 8), fill=(250, 204, 21, 245))
+    draw.ellipse(box_xy(point[0], point[1], 3), fill=(255, 255, 255, 250))
     if active_idx is not None:
         line1, line2, sub, kind, rect = CARDS[active_idx]
         x, y, _w, _h = rect
         text_y = y + 28 if line2 else y + 39
-        draw.text((x + 19, text_y), line1, fill="#F8FAFC", font=FONT_LABEL)
+        draw.text(xy((x + 19, text_y)), line1, fill="#F8FAFC", font=FONT_LABEL)
         if line2:
-            draw.text((x + 19, y + 51), line2, fill="#F8FAFC", font=FONT_LABEL)
+            draw.text(xy((x + 19, y + 51)), line2, fill="#F8FAFC", font=FONT_LABEL)
         if kind == "risk":
-            draw.text((x + 14, y + 67), TEXT["risk_line_1"], fill="#FDE68A", font=FONT_TINY)
-            draw.text((x + 14, y + 81), TEXT["risk_line_2"], fill="#B6A56E", font=FONT_SUB)
+            draw.text(xy((x + 14, y + 67)), TEXT["risk_line_1"], fill="#FDE68A", font=FONT_TINY)
+            draw.text(xy((x + 14, y + 81)), TEXT["risk_line_2"], fill="#B6A56E", font=FONT_SUB)
         else:
-            draw.text((x + 14, y + 77), sub, fill="#9FB4C0", font=FONT_SUB)
+            draw.text(xy((x + 14, y + 77)), sub, fill="#9FB4C0", font=FONT_SUB)
 
     for i, (title, sub, rect) in enumerate(CHIPS):
         x, y, w, h = rect
@@ -357,9 +387,9 @@ def draw_frame(frame: int) -> Image.Image:
             or (active_idx is not None and active_idx >= 6 and i == 2)
         )
         outline = (125, 211, 252, 120 + (80 if active else 0))
-        draw.rounded_rectangle((x, y, x + w, y + h), radius=12, fill=(5, 15, 20, 230), outline=outline, width=1)
-        draw.text((x + 18, y + 12), title, fill="#B6F3EE" if active else "#88A5AA", font=FONT_TINY)
-        draw.text((x + 18, y + 28), sub, fill="#9FB4C0", font=FONT_SUB)
+        draw.rounded_rectangle(rect_xy(rect), radius=sc(12), fill=(5, 15, 20, 230), outline=outline, width=sc(1))
+        draw.text(xy((x + 18, y + 12)), title, fill="#B6F3EE" if active else "#88A5AA", font=FONT_TINY)
+        draw.text(xy((x + 18, y + 28)), sub, fill="#9FB4C0", font=FONT_SUB)
 
     return img.convert("RGB")
 
@@ -367,10 +397,8 @@ def draw_frame(frame: int) -> Image.Image:
 def main() -> None:
     frames = []
     for i in range(FRAME_COUNT):
-        big = Image.new("RGB", (W * SCALE, H * SCALE))
-        frame = draw_frame(i).resize((W * SCALE, H * SCALE), Image.Resampling.NEAREST)
-        big.paste(frame)
-        frames.append(big.resize((W, H), Image.Resampling.LANCZOS))
+        frame = draw_frame(i).resize((OUT_W, OUT_H), Image.Resampling.LANCZOS)
+        frames.append(frame)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     frames[0].save(
