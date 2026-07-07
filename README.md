@@ -146,6 +146,8 @@ Live Desk is designed to feel like the PA_Agent-style trading console that inspi
 
 This keeps real-time analysis useful without letting the LLM bypass the blueprint.
 
+**Execution boundary:** Live Desk is paper-live, not exchange-account execution. It can poll OKX public candles and run the graph at live cadence, but all fills go through the local `PaperBroker`; AlphaLoom currently does not submit OKX demo-account or real-money orders.
+
 ## Copilot Role
 
 Copilot is the strategy authoring layer. It can create a new `.loom` blueprint from natural language, explain an existing graph, adjust gate parameters, add LLM/RAG/reflection nodes, optimize a variant, or repair compiler errors.
@@ -268,6 +270,7 @@ backend\.venv\Scripts\python.exe -m uvicorn alphaloom.serve:app --port 8000 --ap
 
 ## Docs
 
+- [`docs/architecture.md`](docs/architecture.md) - code-aligned implementation architecture.
 - [`docs/demo-script.md`](docs/demo-script.md) - 10-minute talk track.
 - [`docs/evaluation-methodology.md`](docs/evaluation-methodology.md) - scoring caveats and trust boundaries.
 - [`docs/real-data-smoke-test.md`](docs/real-data-smoke-test.md) - exact data window and reproduction notes.

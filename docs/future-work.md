@@ -10,15 +10,17 @@ per-day plan Carryover sections (`docs/superpowers/plans/`).
 
 Today the offline database mixes deterministic synthetic BTC/ETH candles with one
 selected real OKX `SOL-USDT-SWAP` smoke-test window. The **`DataSource` abstraction is
-already in place** (and the OKX-demo broker is sketched), so the seam for broader
-real, multi-market data exists — it just isn't wired to a live feed. The spec
-deliberately kept a single exchange (OKX demo) as the target and preserved the
-abstraction to prove extensibility rather than shipping ten half-working connectors.
+already in place**, and `LiveSession` can poll OKX public candles into the same
+engine context. The seam for broader real, multi-market data exists, but the current
+execution side is still local `PaperBroker` paper trading, not OKX demo-account order
+submission. The original spec kept a single exchange (OKX demo) as the target and
+preserved the abstraction to prove extensibility rather than shipping ten
+half-working connectors.
 
-**Next:** connect a real OKX-demo market feed (and eventually additional
-instruments), then re-run the leaderboard and fidelity ladder against larger real
-market samples to replace the demonstration-window caveats in
-`evaluation-methodology.md` §3.
+**Next:** expand the OKX public/live market feed coverage, add an explicit
+OKX-demo broker only behind `x-simulated-trading=1`, then re-run the leaderboard and
+fidelity ladder against larger real market samples to replace the
+demonstration-window caveats in `evaluation-methodology.md` §3.
 
 ## 2. Evolution lab — scale beyond the demonstration lock
 

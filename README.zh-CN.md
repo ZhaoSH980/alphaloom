@@ -146,6 +146,8 @@ Live Desk 的设计目标是接近 PA_Agent 风格的交易控制台，但中间
 
 这样实时分析可以解释当前市场和蓝图状态，但不能绕过蓝图直接下单。
 
+**执行边界：** Live Desk 是 paper-live，不是交易所账户执行。它可以轮询 OKX 公开 K 线并按实时节奏推进同一张图，但所有成交都走本地 `PaperBroker`；当前版本不会向 OKX demo 账户或真钱账户提交订单。
+
 ## Copilot 的作用
 
 Copilot 是策略创作层。它可以根据自然语言新建 `.loom` 蓝图、解释现有图、调整门控参数、添加 LLM/RAG/反思节点、优化变体，也可以根据编译错误自动修复。
@@ -268,6 +270,7 @@ backend\.venv\Scripts\python.exe -m uvicorn alphaloom.serve:app --port 8000 --ap
 
 ## 文档
 
+- [`docs/architecture.md`](docs/architecture.md) - 与当前代码对齐的实现架构文档。
 - [`docs/demo-script.md`](docs/demo-script.md) - 10 分钟展示讲稿。
 - [`docs/evaluation-methodology.md`](docs/evaluation-methodology.md) - 评分方法、可信边界和 caveat。
 - [`docs/real-data-smoke-test.md`](docs/real-data-smoke-test.md) - 真实 OKX 数据窗口与复现说明。
