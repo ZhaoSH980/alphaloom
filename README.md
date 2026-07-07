@@ -11,9 +11,9 @@
 
 # AlphaLoom
 
-**The graph IS the agent.**
+**Draw a trading agent. Compile its risk contract. Replay every decision.**
 
-An agent-native trading workbench where a `.loom` visual blueprint compiles into a typed, costed, replayable, and falsifiable trading agent.
+AlphaLoom is an agent-native trading workbench where a `.loom` visual blueprint becomes a typed, costed, live-incremental, replayable, and falsifiable trading agent.
 
 [![CI](https://github.com/ZhaoSH980/alphaloom/actions/workflows/ci.yml/badge.svg)](https://github.com/ZhaoSH980/alphaloom/actions/workflows/ci.yml)
 &nbsp;![backend](https://img.shields.io/badge/backend-pytest-2ea043?style=flat-square)
@@ -25,15 +25,38 @@ An agent-native trading workbench where a `.loom` visual blueprint compiles into
 
 <img src="docs/assets/architecture-loop.gif" alt="AlphaLoom animated compile-gated agent loop" width="100%">
 
-**Draw the gate graph. Compile the contracts. Replay every bar. Judge the agent with market evidence.**
+<table>
+<tr>
+<td align="center"><strong>Blueprint-native</strong><br><sub>Strategy topology is an editable graph, not prompt glue.</sub></td>
+<td align="center"><strong>Compile-gated</strong><br><sub>Orders need a typed RiskGate stamp before execution.</sub></td>
+<td align="center"><strong>Live incremental</strong><br><sub>Each new candle advances the same run context.</sub></td>
+<td align="center"><strong>Falsifiable eval</strong><br><sub>Runs face replay, baselines, ablations, and harsher fills.</sub></td>
+</tr>
+</table>
+
+**The graph is not a diagram of the agent. The graph is the agent.**
 
 </div>
 
 ## What It Is
 
-AlphaLoom is built for an AI Agent Engineer demo: it treats a trading strategy as an editable agent blueprint, not as hidden prompt glue. A blueprint can add or remove deterministic gates, LLM committee nodes, RAG/citation checks, reflection memory, position sizing, and execution guards. The compiler then proves the legal order path before runtime.
+AlphaLoom is built for an AI Agent Engineer demo: it turns an LLM trading idea into an inspectable runtime protocol. The first layer is an editable blueprint where you can add, remove, or rewire deterministic gates, LLM committee nodes, RAG/citation checks, reflection memory, position sizing, and execution guards. The compiler then proves the legal order path before runtime, so the system can show exactly why an order was allowed, rejected, replayed, or repaired.
 
 It is a research/demo system, not financial advice and not an alpha claim.
+
+## Why AlphaLoom Is Different
+
+Most LLM trading demos hide the important parts in a prompt transcript: the model reads candles, emits a signal, and the audience has to trust the story. AlphaLoom makes those parts first-class artifacts.
+
+| Typical LLM trading bot | AlphaLoom |
+|---|---|
+| Prompt text is the strategy | `.loom` graph is the strategy protocol |
+| LLM can jump from opinion to trade | Raw LLM output cannot enter `ExecuteOrder` |
+| Demo success is a screenshot | Runs are replayable from recorded candles and LLM calls |
+| Risk control is a paragraph | Risk is a typed gate with compiler-visible contracts |
+| Evaluation is a persuasive explanation | Eval Lab runs baselines, fidelity ladders, ablations, and genealogy |
+
+The result is closer to a trading-agent operating system than a chatbot wrapper: Copilot may propose a blueprint, Live Desk may stream bars through it, and Eval Lab may disprove it.
 
 ## One Click Demo
 
@@ -76,7 +99,7 @@ Restart `START_ALPHALOOM.cmd`, then switch `Offline -> Live` in the top-right mo
 | Surface | What to show | Why it matters |
 |---|---|---|
 | Studio | Editable `.loom` blueprint, type edges, cost certificate, Copilot diff | The agent is the graph. You can swap gates or add LLM components. |
-| Live Desk | PA_Agent-style paper-live screen: blueprint left, candles center, diagnosis/gates/reflection right | The graph runs bar by bar, so the demo feels like a live trading desk. |
+| Live Desk | PA_Agent-style live desk: blueprint left, candles center, gates/reflection/LLM analysis right | A `LiveSession` streams candles into the same run context, so the graph moves bar by bar. |
 | Terminal | Run picker, trace explorer, node I/O, committee/reflection evidence | Every decision is replayable and auditable after the run. |
 | Eval Lab | Fidelity ladder, scorecard, leaderboard, ablations, evolution genealogy | Results face harsher fills and baselines instead of a persuasive transcript. |
 
@@ -112,11 +135,22 @@ Backtests are launched from Studio or Live Desk by choosing:
 
 During a run, the chart cursor reveals candles, fills, equity, and active graph nodes in replay order. The backtest engine uses next-bar-open fills, attached stops, EOD settlement, and no look-ahead reads; Eval Lab can then replay the same fills under harsher fidelity assumptions.
 
+## Live Incremental Loop
+
+Live Desk is designed to feel like the PA_Agent-style trading console that inspired the project, but with AlphaLoom's compile gate in the middle:
+
+1. A backend `LiveSession` pulls or replays candles by `instrument + bar + timestamp`.
+2. Each new bar is fed into the same `Engine` / `RunContext`; node state, positions, reflection memory, and risk state continue forward.
+3. The sidecar LLM reads recent candles, current node outputs, risk status, fills, drawdown, and memory, then writes an auditable analysis card.
+4. Every sidecar output is recorded with prompt hash, bar timestamp, input summary, output JSON, and model name so Eval Lab can replay it later.
+
+This keeps real-time analysis useful without letting the LLM bypass the blueprint.
+
 ## Copilot Role
 
-Copilot can generate, explain, optimize, and repair blueprints from natural language, but it does not bypass the compiler. Proposed changes appear as a diff, then must compile through the typed graph before any backtest or execution path is legal.
+Copilot is the strategy authoring layer. It can create a new `.loom` blueprint from natural language, explain an existing graph, adjust gate parameters, add LLM/RAG/reflection nodes, optimize a variant, or repair compiler errors.
 
-This keeps the LLM useful as a strategy author while the system remains a gate-driven trading runtime.
+It is deliberately not an execution shortcut. Proposed changes appear as a diff, then must compile through the typed graph before any backtest or execution path is legal. This keeps the LLM useful as a strategy builder while the runtime remains gate-driven and auditable.
 
 ## Real Market Smoke Test
 
@@ -178,10 +212,11 @@ In this paired run, removing reflection turned a small positive result into five
 | Step | Show | Point |
 |---|---|---|
 | 1 | Studio graph | The agent is the blueprint, not hidden prompt glue. |
-| 2 | `risk_gate -> execute_order` | Risk control is enforced by the compiler. |
-| 3 | Live Desk | The selected graph runs against candles with active gates visible. |
-| 4 | Terminal replay | Fills, equity, citations, node I/O, and reflection are inspectable. |
-| 5 | Eval Lab | Results face baselines, ablations, and harsher fill models. |
+| 2 | Cost certificate + legal order path | The compiler knows token cost, deterministic ratio, and the only route to execution. |
+| 3 | `risk_gate -> execute_order` | Raw LLM output cannot trade without a typed RiskGate stamp. |
+| 4 | Live Desk | Candles advance, gates light up, sidecar analysis explains the current bar. |
+| 5 | Terminal replay | Fills, equity, citations, node I/O, and reflection are inspectable. |
+| 6 | Eval Lab | The same run faces baselines, ablations, and harsher fill models. |
 
 <details>
 <summary><strong>Manual startup</strong></summary>
