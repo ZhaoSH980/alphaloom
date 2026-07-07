@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "docs" / "assets" / "architecture-loop.gif"
+LANG = "zh" if any(arg.lower() in {"zh", "--zh", "--lang=zh"} for arg in sys.argv[1:]) else "en"
+OUT = (
+    ROOT / "docs" / "assets" / "zh" / "zh-architecture-loop.gif"
+    if LANG == "zh"
+    else ROOT / "docs" / "assets" / "architecture-loop.gif"
+)
 
 W, H = 1000, 384
 SCALE = 2
@@ -16,10 +22,19 @@ FRAME_MS = 70
 
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    candidates = [
-        Path("C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf"),
-        Path("C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf"),
-    ]
+    if LANG == "zh":
+        candidates = [
+            Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"),
+            Path("C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc"),
+            Path("C:/Windows/Fonts/simhei.ttf"),
+            Path("C:/Windows/Fonts/Dengb.ttf" if bold else "C:/Windows/Fonts/Deng.ttf"),
+            Path("C:/Windows/Fonts/simsun.ttc"),
+        ]
+    else:
+        candidates = [
+            Path("C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf"),
+            Path("C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf"),
+        ]
     for path in candidates:
         if path.exists():
             return ImageFont.truetype(str(path), size)
@@ -53,22 +68,57 @@ def gradient_bg() -> Image.Image:
 BG = gradient_bg()
 
 
-CARDS = [
-    ("Input", "", "intent + data", "cyan", (28, 112, 105, 98)),
-    ("Blueprint", "Studio", "typed .loom graph", "cyan", (151, 112, 105, 98)),
-    ("Compiler", "", "pins, cycles, cost", "cyan", (274, 112, 105, 98)),
-    ("RiskGate", "", "risk stamp required", "risk", (397, 112, 105, 98)),
-    ("Runtime", "Broker", "fills, stops, equity", "cyan", (520, 112, 105, 98)),
-    ("Recorder", "", "node I/O replay", "cyan", (643, 112, 105, 98)),
-    ("Eval Lab", "", "fidelity, baselines", "cyan", (766, 112, 105, 98)),
-    ("Copilot", "Evolution", "mutate + repair", "cyan", (889, 112, 105, 98)),
-]
+TEXT = {
+    "en": {
+        "title_1": "Compile-gated trading",
+        "title_2": "agent loop",
+        "subtitle": "Input becomes a visual graph only after cost, causality, and risk contracts compile.",
+        "risk_line_1": "legal order path",
+        "risk_line_2": "stamp required",
+        "loop_note": "compile errors become repair hints; held-out winners feed the next blueprint",
+        "cards": [
+            ("Input", "", "intent + data", "cyan", (28, 112, 105, 98)),
+            ("Blueprint", "Studio", "typed .loom graph", "cyan", (151, 112, 105, 98)),
+            ("Compiler", "", "pins, cycles, cost", "cyan", (274, 112, 105, 98)),
+            ("RiskGate", "", "risk stamp required", "risk", (397, 112, 105, 98)),
+            ("Runtime", "Broker", "fills, stops, equity", "cyan", (520, 112, 105, 98)),
+            ("Recorder", "", "node I/O replay", "cyan", (643, 112, 105, 98)),
+            ("Eval Lab", "", "fidelity, baselines", "cyan", (766, 112, 105, 98)),
+            ("Copilot", "Evolution", "mutate + repair", "cyan", (889, 112, 105, 98)),
+        ],
+        "chips": [
+            ("TYPE CONTRACT", "raw signal cannot enter ExecuteOrder", (63, 312, 267, 45)),
+            ("OFFLINE REPLAY", "recorded LLM calls, zero quota demo", (367, 312, 267, 45)),
+            ("REAL DATA CHECK", "OKX candles, exact window, honest caveats", (670, 312, 267, 45)),
+        ],
+    },
+    "zh": {
+        "title_1": "编译门控交易",
+        "title_2": "Agent 闭环",
+        "subtitle": "输入只有通过成本、因果和风控合约编译后，才会进入可视化蓝图。",
+        "risk_line_1": "合法下单路径",
+        "risk_line_2": "需要风控盖章",
+        "loop_note": "编译错误变成修复提示；留出集赢家进入下一版蓝图",
+        "cards": [
+            ("输入", "", "意图 + 数据", "cyan", (28, 112, 105, 98)),
+            ("蓝图", "工坊", "类型 .loom 图", "cyan", (151, 112, 105, 98)),
+            ("编译器", "", "pin / 环 / 成本", "cyan", (274, 112, 105, 98)),
+            ("风控门", "", "需要 risk stamp", "risk", (397, 112, 105, 98)),
+            ("运行时", "Broker", "成交/止损/权益", "cyan", (520, 112, 105, 98)),
+            ("记录器", "", "节点 I/O 回放", "cyan", (643, 112, 105, 98)),
+            ("评估室", "", "保真度/基线", "cyan", (766, 112, 105, 98)),
+            ("Copilot", "进化", "变异 + 修复", "cyan", (889, 112, 105, 98)),
+        ],
+        "chips": [
+            ("类型合约", "裸信号不能进入 ExecuteOrder", (63, 312, 267, 45)),
+            ("离线回放", "已录制 LLM 调用，零配额演示", (367, 312, 267, 45)),
+            ("真实数据检查", "OKX K线，精确窗口，诚实 caveat", (670, 312, 267, 45)),
+        ],
+    },
+}[LANG]
 
-CHIPS = [
-    ("TYPE CONTRACT", "raw signal cannot enter ExecuteOrder", (63, 312, 267, 45)),
-    ("OFFLINE REPLAY", "recorded LLM calls, zero quota demo", (367, 312, 267, 45)),
-    ("REAL DATA CHECK", "OKX candles, exact window, honest caveats", (670, 312, 267, 45)),
-]
+CARDS = TEXT["cards"]
+CHIPS = TEXT["chips"]
 
 
 def center(rect: tuple[int, int, int, int]) -> tuple[float, float]:
@@ -195,11 +245,11 @@ def draw_frame(frame: int) -> Image.Image:
         fill=(18, 61, 75, 150),
         width=2,
     )
-    draw.text((48, 23), "Compile-gated trading", fill="#F8FAFC", font=FONT_TITLE)
-    draw.text((48, 48), "agent loop", fill="#F8FAFC", font=FONT_TITLE)
+    draw.text((48, 23), TEXT["title_1"], fill="#F8FAFC", font=FONT_TITLE)
+    draw.text((48, 48), TEXT["title_2"], fill="#F8FAFC", font=FONT_TITLE)
     draw.text(
         (48, 78),
-        "Input becomes a visual graph only after cost, causality, and risk contracts compile.",
+        TEXT["subtitle"],
         fill="#9FB4C0",
         font=FONT_SUB,
     )
@@ -241,8 +291,8 @@ def draw_frame(frame: int) -> Image.Image:
         if line2:
             draw.text((x + 19, y + 51), line2, fill="#F8FAFC", font=FONT_LABEL)
         if kind == "risk":
-            draw.text((x + 14, y + 67), "legal order path", fill="#FDE68A", font=FONT_TINY)
-            draw.text((x + 14, y + 81), "stamp required", fill="#B6A56E", font=FONT_SUB)
+            draw.text((x + 14, y + 67), TEXT["risk_line_1"], fill="#FDE68A", font=FONT_TINY)
+            draw.text((x + 14, y + 81), TEXT["risk_line_2"], fill="#B6A56E", font=FONT_SUB)
         else:
             draw.text((x + 14, y + 77), sub, fill="#9FB4C0", font=FONT_SUB)
 
@@ -268,7 +318,7 @@ def draw_frame(frame: int) -> Image.Image:
         draw.line((a, b), fill=loop_color, width=2)
     draw.text(
         (382, 282),
-        "compile errors become repair hints; held-out winners feed the next blueprint",
+        TEXT["loop_note"],
         fill=(182, 243, 238, 205),
         font=FONT_TINY,
     )
@@ -294,8 +344,8 @@ def draw_frame(frame: int) -> Image.Image:
         if line2:
             draw.text((x + 19, y + 51), line2, fill="#F8FAFC", font=FONT_LABEL)
         if kind == "risk":
-            draw.text((x + 14, y + 67), "legal order path", fill="#FDE68A", font=FONT_TINY)
-            draw.text((x + 14, y + 81), "stamp required", fill="#B6A56E", font=FONT_SUB)
+            draw.text((x + 14, y + 67), TEXT["risk_line_1"], fill="#FDE68A", font=FONT_TINY)
+            draw.text((x + 14, y + 81), TEXT["risk_line_2"], fill="#B6A56E", font=FONT_SUB)
         else:
             draw.text((x + 14, y + 77), sub, fill="#9FB4C0", font=FONT_SUB)
 

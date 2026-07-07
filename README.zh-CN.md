@@ -23,7 +23,7 @@ AlphaLoom 是一个 Agent-native 交易工作台：`.loom` 可视化蓝图会被
 
 <br>
 
-<img src="docs/assets/zh/zh-readme-overview.png" alt="AlphaLoom 中文总览：蓝图、编译器、风控、运行时、离线回放和评估实验室" width="100%">
+<img src="docs/assets/zh/zh-architecture-loop.gif" alt="AlphaLoom 中文编译门控 Agent 闭环动画" width="100%">
 
 <table>
 <tr>
