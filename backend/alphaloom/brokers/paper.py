@@ -65,18 +65,29 @@ class PaperBroker:
         p = self._pos
         closing = (p.qty > 0 > signed) or (p.qty < 0 < signed)
         crossed = closing and abs(signed) > abs(p.qty)   # 反手：平掉全部旧仓并反向开新仓
+        new_qty = p.qty + signed
         if closing:
             closed_qty = min(abs(p.qty), abs(signed))
+            close_fee = fee * (closed_qty / abs(signed)) if signed else 0.0
+            open_fee = fee - close_fee
+            entry_cost_closed = (
+                self._entry_cost * (closed_qty / abs(p.qty)) if p.qty else 0.0
+            )
+            entry_cost_remaining = max(0.0, self._entry_cost - entry_cost_closed)
             pnl = (price - p.avg_price) * closed_qty * (1 if p.qty > 0 else -1)
-            net_pnl = pnl - fee - self._entry_cost
+            net_pnl = pnl - close_fee - entry_cost_closed
             self._round_trips.append(net_pnl)
             # entry_side = 被平掉的持仓方向（p.qty>0 是多头往返）
             self.closed_trades.append(
                 {"ts": ts, "pnl": net_pnl, "entry_side": "long" if p.qty > 0 else "short"})
-            self._entry_cost = 0.0
+            if crossed:
+                self._entry_cost = open_fee
+            elif new_qty == 0:
+                self._entry_cost = 0.0
+            else:
+                self._entry_cost = entry_cost_remaining
         else:
             self._entry_cost += fee
-        new_qty = p.qty + signed
         if not closing and (p.qty == 0 or abs(new_qty) > abs(p.qty)):
             total = p.avg_price * abs(p.qty) + price * abs(signed)
             p.avg_price = total / (abs(p.qty) + abs(signed))

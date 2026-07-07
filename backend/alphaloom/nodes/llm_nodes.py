@@ -88,7 +88,7 @@ class LLMAnalystNode:
         }, sort_keys=True)
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": user}]
-        response = ctx.llm.chat(messages, temperature=0.2)
+        response = ctx.llm.chat(messages, temperature=0.2, max_tokens=512)
         if ctx.audit is not None:
             ctx.audit.record(
                 tool="llm_chat",
@@ -220,7 +220,7 @@ class CommitteeNode:
     def _ask(self, ctx, system, user, *, role, ts):
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": user}]
-        response = ctx.llm.chat(messages, temperature=0.2)
+        response = ctx.llm.chat(messages, temperature=0.2, max_tokens=512)
         if ctx.audit is not None:
             ctx.audit.record(
                 tool=f"committee:{role}",

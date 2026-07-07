@@ -1,5 +1,6 @@
 # backend/alphaloom/api/schemas.py
 from __future__ import annotations
+from typing import Literal
 from pydantic import BaseModel, Field
 
 # 评估窗口/规模上界（对齐 RunIn 的 int64 溢出防护 + evolve 规模硬锁定）
@@ -11,6 +12,10 @@ class CompileIn(BaseModel):
 
 class SaveBlueprintIn(BaseModel):
     blueprint: dict
+
+
+class RuntimeModeIn(BaseModel):
+    mode: Literal["offline", "live", "none"]
 
 class RunIn(BaseModel):
     blueprint: dict
@@ -26,6 +31,21 @@ class RunIn(BaseModel):
     # D3：backtest（默认）| replay（走真实 LLM/录制，加速由 playback_ms 控制）。
     # 两种模式都绑注入的 LLM 客户端——D3 replay 语义先等同 backtest 但确保 LLM 节点能跑。
     mode: str = "backtest"
+
+
+class LiveStartIn(BaseModel):
+    blueprint: dict
+    inst: str
+    bar: str = "1m"
+    cash: float = 10_000.0
+    fee_rate: float = 0.0005
+    poll_ms: int = Field(default=5_000, ge=250, le=300_000)
+    analysis: bool = True
+    analysis_every: int = Field(default=1, ge=1, le=100)
+    context_bars: int = Field(default=30, ge=1, le=120)
+    max_bars: int | None = Field(default=None, ge=1, le=10_000)
+    fetch_limit: int = Field(default=5, ge=1, le=100)
+    ws_wait_ms: int = Field(default=0, ge=0, le=30_000)
 
 
 class CopilotBlueprintIn(BaseModel):

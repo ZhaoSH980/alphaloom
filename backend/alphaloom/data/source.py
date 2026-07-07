@@ -2,8 +2,19 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterator
 
-_BAR_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000,
-           "1H": 3_600_000, "4H": 14_400_000, "1D": 86_400_000}
+_BAR_MS = {
+    "1m": 60_000,
+    "3m": 180_000,
+    "5m": 300_000,
+    "15m": 900_000,
+    "30m": 1_800_000,
+    "1H": 3_600_000,
+    "2H": 7_200_000,
+    "4H": 14_400_000,
+    "6H": 21_600_000,
+    "12H": 43_200_000,
+    "1D": 86_400_000,
+}
 
 def bar_to_ms(bar: str) -> int:
     return _BAR_MS[bar]

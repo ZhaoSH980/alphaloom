@@ -67,6 +67,7 @@ def _config_summary(signal: dict) -> str:
         "atr": PinType.SERIES,
     },
     outputs={"verdict": PinType.SERIES},
+    optional_inputs={"ema", "atr"},
     cost=CostAnnotation(
         llm_calls_per_bar=0,
         max_tokens_per_call=0,

@@ -3,8 +3,8 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
-set "PORT=8000"
-set "URL=http://127.0.0.1:%PORT%/#/studio"
+if not defined PORT set "PORT=8000"
+set "URL=http://127.0.0.1:%PORT%/?alphaloom=%RANDOM%#/studio"
 set "PY=backend\.venv\Scripts\python.exe"
 
 echo.
@@ -83,13 +83,22 @@ echo URL: %URL%
 echo Stop: press Ctrl+C in this window.
 echo.
 
-powershell -NoProfile -Command "try { $c = Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue; if ($c) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>nul
-if not errorlevel 1 (
-  echo [INFO] Port %PORT% is already in use. Opening the existing service.
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\alphaloom_port_guard.ps1 -Port %PORT%
+set "PORT_GUARD=%ERRORLEVEL%"
+if "%PORT_GUARD%"=="0" (
+  echo [INFO] AlphaLoom is already running on port %PORT%. Opening it.
   start "" "%URL%"
   echo.
   pause
   exit /b 0
+)
+if "%PORT_GUARD%"=="2" (
+  echo [ERROR] Port %PORT% is already used by another service.
+  echo         Close that service, or start AlphaLoom on another port:
+  echo         set PORT=8010 ^&^& START_ALPHALOOM.cmd
+  echo.
+  pause
+  exit /b 1
 )
 
 powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Start-Process '%URL%'" >nul 2>nul

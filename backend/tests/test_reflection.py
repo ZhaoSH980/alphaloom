@@ -415,7 +415,8 @@ def _memory_inject_node_registered():
 
     @_nd(type="mem_inject", category="test",
          inputs={"signal": PinType.SIGNAL, "lessons": PinType.SERIES},
-         outputs={"signal": PinType.SIGNAL})
+         outputs={"signal": PinType.SIGNAL},
+         optional_inputs={"lessons"})
     class _MemInject:
         def setup(self, params):
             pass

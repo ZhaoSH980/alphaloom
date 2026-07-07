@@ -38,7 +38,7 @@
   <text x="732" y="198" class="num">2.77%</text>
   <text x="732" y="226" class="sub">base max DD</text>
 
-  <rect class="card" x="920" y="124" width="150" height="128" rx="18"/>
+  <rect class="card" x="920" y="124" width="190" height="128" rx="18"/>
   <text x="948" y="158" class="label">Evolution</text>
   <text x="948" y="198" class="num">+19.83%</text>
   <text x="948" y="226" class="sub">param variant</text>
@@ -48,6 +48,6 @@
   <circle cx="367" cy="284" r="7" fill="#34D399"/>
   <circle cx="583" cy="284" r="7" fill="#34D399"/>
   <circle cx="799" cy="284" r="7" fill="#34D399"/>
-  <circle cx="995" cy="284" r="7" fill="#FACC15"/>
+  <circle cx="1015" cy="284" r="7" fill="#FACC15"/>
   <text x="322" y="322" class="sub" fill="#A7F3D0">smoke-test evidence is shown with caveats; it is not an alpha claim</text>
 </svg>

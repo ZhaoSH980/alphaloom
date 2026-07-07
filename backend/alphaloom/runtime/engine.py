@@ -21,7 +21,7 @@ class SandboxEscapeError(RuntimeError):
 
 
 # 沙箱节点被剥夺访问的 ctx 能力（LLM 句柄 + 其 provenance 审计钩子）。
-_SANDBOX_DENIED_CTX_ATTRS = frozenset({"llm", "audit"})
+_SANDBOX_DENIED_CTX_ATTRS = frozenset({"llm", "audit", "broker"})
 
 # 受限视图 → 真 ctx 的映射存**类外的模块级 WeakKeyDictionary**（不在实例对象图上）。
 # 这样真 ctx 在受限视图的对象图上根本不可达：``view.__dict__`` 为空、``view._ctx``
@@ -50,9 +50,9 @@ class _RestrictedContext:
         # __getattr__ 只在常规查找失败时触发——本类无实例属性，故所有属性都走这里。
         if name in _SANDBOX_DENIED_CTX_ATTRS:
             raise SandboxEscapeError(
-                f"sandboxed node may not access ctx.{name}: the LLM handle is "
-                "stripped from sandbox nodes (declared-deterministic must be truly "
-                "deterministic; sandbox nodes cannot burn LLM quota)")
+                f"sandboxed node may not access ctx.{name}: effectful runtime "
+                "capabilities are stripped from sandbox nodes (declared-deterministic "
+                "must be truly deterministic and cannot bypass gates)")
         ctx = _CTX_BACKING.get(self)
         if ctx is None:
             raise AttributeError(name)

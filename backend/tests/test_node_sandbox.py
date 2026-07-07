@@ -429,6 +429,49 @@ class LoopAugOkNode:
     assert not isinstance(d, SandboxError), getattr(d, "message", d)
 
 
+def test_nested_range_product_is_capped():
+    src = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="nested_loop_bomb", category="indicator",
+      inputs={"candle": PinType.CANDLE}, outputs={"value": PinType.SERIES},
+      cost=CostAnnotation(deterministic=True))
+class NestedLoopBombNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        total = 0
+        for i in range(100000):
+            for j in range(100000):
+                total += 1
+        return {"value": total}
+'''
+    result = compile_node_source(src)
+    assert isinstance(result, SandboxError)
+    assert result.reason == "loop_work"
+
+
+def test_large_sequence_repeat_rejected():
+    src = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="repeat_bomb", category="indicator",
+      inputs={"candle": PinType.CANDLE}, outputs={"value": PinType.SERIES},
+      cost=CostAnnotation(deterministic=True))
+class RepeatBombNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        payload = "A" * 300000000
+        return {"value": len(payload)}
+'''
+    result = compile_node_source(src)
+    assert isinstance(result, SandboxError)
+    assert result.reason == "sequence_repeat"
+
+
 def test_augassign_untracks_on_unknown_operand():
     """AugAssign 用未知量（n += param）→ n 变未知，从常量表移除，range(n) 保守放行
     （运行时 builtins 受限无逃逸面；不误伤合法 range(param) 式用法）。"""
@@ -650,7 +693,7 @@ def test_sandbox_node_cannot_reach_ctx_llm_via_engine():
     assert spy.calls == 0        # 真 LLM 绝对没被偷调——剥离生效
 
 
-def test_restricted_ctx_passes_through_legit_attrs_but_strips_llm():
+def test_restricted_ctx_passes_through_legit_attrs_but_strips_capabilities():
     """受限 ctx 视图：合法纯计算所需属性（clock/broker/run_id）照常委托真 ctx，
     唯 .llm/.audit 被剥夺——不误伤合法沙箱节点的正常数据处理。"""
     from alphaloom.runtime.context import RunContext, SimClock
@@ -660,12 +703,54 @@ def test_restricted_ctx_passes_through_legit_attrs_but_strips_llm():
                       llm="SECRET_LLM", audit="AUDIT")
     view = _RestrictedContext(real)
     assert view.run_id == "run-42"
-    assert view.broker == "BROKER"
     assert view.clock is real.clock
     with pytest.raises(SandboxEscapeError):
         _ = view.llm
     with pytest.raises(SandboxEscapeError):
         _ = view.audit
+    with pytest.raises(SandboxEscapeError):
+        _ = view.broker
+
+
+def test_sandbox_node_cannot_reach_ctx_broker_via_engine():
+    from alphaloom.brokers.paper import PaperBroker
+    from alphaloom.graph.model import BlueprintSpec, EdgeSpec, NodeSpec as NS, PortRef
+    from alphaloom.graph.compiler import compile_blueprint
+    from alphaloom.runtime.context import RunContext, SimClock
+    from alphaloom.runtime.engine import Engine, SandboxEscapeError
+    from alphaloom.runtime.events import BarEvent
+
+    src = '''
+from alphaloom.graph.types import PinType, CostAnnotation
+from alphaloom.sandbox.node_sandbox import node
+
+@node(type="broker_thief", category="decision",
+      inputs={"candle": PinType.CANDLE}, outputs={"signal": PinType.SIGNAL},
+      cost=CostAnnotation(deterministic=True))
+class BrokerThiefNode:
+    def setup(self, params):
+        pass
+    def on_bar(self, ctx, inputs):
+        ctx.broker.halt("stolen")
+        return {"signal": {"side": "hold", "qty": 0.0, "stop": None}}
+'''
+    d = compile_node_source(src)
+    assert not isinstance(d, SandboxError)
+    bp = BlueprintSpec("broker_thief_bp", "broker thief", [
+        NS("feed", "candle_feed", {"inst": "TEST", "bar": "1m"}),
+        NS("thief", "broker_thief", {}),
+    ], [EdgeSpec(PortRef("feed", "out"), PortRef("thief", "candle"), False)], {})
+    compiled = compile_blueprint(bp)
+    assert compiled.ok
+    broker = PaperBroker()
+    instances = {nid: create_instance(spec) for nid, spec in compiled.nodes.items()}
+    ctx = RunContext(clock=SimClock(), run_id="r", broker=broker)
+    engine = Engine(compiled, instances, ctx)
+    candle = {"ts": 0, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0}
+
+    with pytest.raises(SandboxEscapeError):
+        engine.step(BarEvent(candle, 60_000))
+    assert broker.halted is False
 
 
 def test_builtin_llm_node_still_gets_real_llm():

@@ -54,7 +54,19 @@ def test_ws_breakpoint_pause_resume(client):
         assert (paused2["node_id"], paused2["ts"]) != (paused["node_id"], paused["ts"])
         ws.send_json({"cmd": "stop"})
         end = _collect_until(ws, "done")
-        assert end["report"]["bars"] == 60
+        assert end["report"]["bars"] < 60
+
+def test_ws_stop_halts_plain_streaming_run(client):
+    r = client.post("/api/runs", json={"blueprint": _loom(), "inst": "BTC-USDT-SWAP",
+                                       "bar": "1m", "playback_ms": 5,
+                                       "ws_wait_ms": 3000})
+    run_id = r.json()["run_id"]
+    with client.websocket_connect(f"/ws/runs/{run_id}") as ws:
+        first_bar = _collect_until(ws, "bar")
+        assert first_bar["idx"] >= 0
+        ws.send_json({"cmd": "stop"})
+        end = _collect_until(ws, "done")
+        assert end["report"]["bars"] < 60
 
 def test_ws_unknown_run_closes(client):
     with pytest.raises(Exception):

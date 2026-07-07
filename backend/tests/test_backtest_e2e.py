@@ -43,6 +43,21 @@ def test_breakout_end_to_end(tmp_path):
     report = run_backtest(bp, db, inst="BTC-USDT-SWAP", bar="1m")
     assert report.bars == 600 and "net_pnl" in report.summary
 
+def test_backtest_can_stop_on_bar_boundary(tmp_path):
+    db = _db(tmp_path)
+    bp = load_loom_file(REPO / "blueprints" / "ema_cross.loom")
+    calls = 0
+
+    def should_stop():
+        nonlocal calls
+        calls += 1
+        return calls > 10
+
+    report = run_backtest(bp, db, inst="BTC-USDT-SWAP", bar="1m",
+                          should_stop=should_stop)
+
+    assert report.bars == 10
+
 def test_cli_run_and_compile(tmp_path, capsys):
     from alphaloom.cli import main
     db = _db(tmp_path)  # noqa: F841  路径在 tmp_path/m.sqlite

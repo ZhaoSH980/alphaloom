@@ -58,6 +58,7 @@ def test_committee_three_roles_sequential_with_structured_handoff():
 
     # 恰好三次 LLM 调用
     assert len(llm.calls) == 3
+    assert [call["max_tokens"] for call in llm.calls] == [512, 512, 512]
 
     # 风控官（第 2 次）的 user prompt 里含策略师提案 —— 结构化交接自证
     risk_user = "".join(

@@ -36,7 +36,7 @@ def run_backtest(bp: BlueprintSpec, source: DataSource, *, inst: str, bar: str,
                  start_ms: int | None = None, end_ms: int | None = None,
                  initial_cash: float = 10_000.0, fee_rate: float = 0.0005,
                  record_dir=None, run_id: str | None = None, breakpoints=None,
-                 on_pause=None, on_bar=None, llm=None) -> BacktestReport:
+                 on_pause=None, on_bar=None, llm=None, should_stop=None) -> BacktestReport:
     """时序契约：每根 bar 先 broker.on_bar（撮合上一根挂单/止损）再 engine.step（本根决策）
     —— 次 bar 开盘成交语义的另一半（见 PaperBroker.on_bar）。
 
@@ -68,6 +68,8 @@ def run_backtest(bp: BlueprintSpec, source: DataSource, *, inst: str, bar: str,
     last_candle = None
     try:
         for candle in source.iter_candles(inst, bar, start_ms, end_ms):
+            if should_stop is not None and should_stop():
+                break
             broker.on_bar(candle)              # 先撮合上一根的挂单/止损并 mark
             engine.step(BarEvent(candle, bar_ms))
             last_candle = candle

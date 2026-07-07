@@ -48,6 +48,9 @@ class BreakBridge:
             self.step_mode = False
             self._gate.set()
 
+    def stopped(self) -> bool:
+        return self._stopped
+
 def _jsonable(obj):
     try:
         json.dumps(obj)
@@ -65,7 +68,7 @@ def _safe_sink(sink):
     return safe
 
 class RunService:
-    def __init__(self, store, db_path, record_dir, llm=None):
+    def __init__(self, store, db_path, record_dir, llm=None, max_active_runs: int = 4):
         self.store = store
         self.db_path = db_path
         self.record_dir = record_dir
@@ -74,31 +77,51 @@ class RunService:
         self.llm = llm
         self._threads: dict[str, threading.Thread] = {}
         self._bridges: dict[str, BreakBridge] = {}
+        self._lock = threading.Lock()
+        self.max_active_runs = max(1, int(max_active_runs))
+
+    def _prune_threads(self) -> None:
+        for rid, thread in list(self._threads.items()):
+            if not thread.is_alive():
+                self._threads.pop(rid, None)
 
     def start(self, bp: BlueprintSpec, params: dict, sink,
               run_id: str | None = None) -> str:
         run_id = run_id or uuid.uuid4().hex[:12]
-        self.store.create(run_id, bp.id, dumps_loom(bp), json.dumps(params),
-                          int(time.time() * 1000))
         bridge = BreakBridge(params.get("breakpoints", []), sink)
-        self._bridges[run_id] = bridge
-        t = threading.Thread(target=self._worker, args=(run_id, bp, params, sink, bridge),
-                             daemon=True)
-        self._threads[run_id] = t
+        with self._lock:
+            self._prune_threads()
+            if len(self._threads) >= self.max_active_runs:
+                raise RuntimeError("too many active runs; wait for one to finish")
+            llm_snapshot = self.llm
+            t = threading.Thread(
+                target=self._worker,
+                args=(run_id, bp, params, sink, bridge, llm_snapshot),
+                daemon=True)
+            self.store.create(run_id, bp.id, dumps_loom(bp), json.dumps(params),
+                              int(time.time() * 1000))
+            self._bridges[run_id] = bridge
+            self._threads[run_id] = t
         t.start()
         return run_id
 
+    def set_llm(self, llm) -> None:
+        with self._lock:
+            self.llm = llm
+
     def command(self, run_id, cmd):
-        bridge = self._bridges.get(run_id)
+        with self._lock:
+            bridge = self._bridges.get(run_id)
         if bridge:
             bridge.command(cmd)
 
     def join(self, run_id, timeout=None):
-        t = self._threads.get(run_id)
+        with self._lock:
+            t = self._threads.get(run_id)
         if t:
             t.join(timeout)
 
-    def _worker(self, run_id, bp, params, sink, bridge):
+    def _worker(self, run_id, bp, params, sink, bridge, llm):
         sink = _safe_sink(sink)
         sink({"type": "status", "status": "running"})
         source = None
@@ -127,7 +150,8 @@ class RunService:
                 breakpoints="all" if want_break else None,
                 on_pause=bridge.on_pause if want_break else None,
                 on_bar=on_bar_event,
-                llm=self.llm)   # LLM 注入接缝：run 拿到注入的 RecordingLLMClient
+                llm=llm,   # LLM client snapshot from run start.
+                should_stop=bridge.stopped)
             status = "halted" if report.summary.get("halted") else "completed"
             payload = {"run_id": report.run_id, "blueprint_id": report.blueprint_id,
                        "bars": report.bars, "summary": sanitize(report.summary),
@@ -149,4 +173,6 @@ class RunService:
                     source.close()   # T3 复审前瞻：source 连接收尾
                 except Exception:
                     pass
-            self._bridges.pop(run_id, None)
+            with self._lock:
+                self._bridges.pop(run_id, None)
+                self._threads.pop(run_id, None)

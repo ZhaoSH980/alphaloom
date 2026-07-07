@@ -217,6 +217,17 @@ def test_copilot_blueprint_generation_failure_maps_to_422(tmp_path):
     assert r.status_code == 422, r.text
 
 
+def test_copilot_offline_replay_miss_maps_to_422(tmp_path):
+    """Offline Copilot needs an exact recorded request; cache miss must be a clear 422."""
+    client, _llm, _tr = _make_client(tmp_path, offline=True)
+    r = client.post("/api/copilot/blueprint",
+                    json={"nl": "EMA cross trend follow routed through the risk gate"})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["error"] == "offline_replay_miss"
+    assert "Switch to Live mode" in detail["hint"]
+
+
 # --------------------------------------------------------------------------- #
 # custom-node 沙箱端点
 # --------------------------------------------------------------------------- #

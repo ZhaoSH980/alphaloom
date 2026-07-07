@@ -42,6 +42,7 @@ def test_analyst_produces_signal_with_rationale_and_stop():
     assert out["stop"] == pytest.approx(100 - 2.0 * 1.5)   # long: close - atr_mult*atr
     assert out["citations"] == []
     assert len(llm.calls) == 1 and llm.calls[0]["temperature"] == pytest.approx(0.2)
+    assert llm.calls[0]["max_tokens"] == 512
     assert ctx.audit.as_dicts()[0]["tool"] == "llm_chat"   # 审计留痕
 
     short_llm = _FakeLLM(json.dumps({"side": "short", "rationale": "down", "confidence": 0.6}))

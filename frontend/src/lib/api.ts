@@ -1,5 +1,9 @@
 // frontend/src/lib/api.ts
 import type { Loom, NodeDef } from "./loom";
+import type { MarketWindow } from "./backtestConfig";
+
+export type RuntimeMode = "offline" | "live" | "none";
+export type RuntimeStatus = { llm_mode: RuntimeMode; model: string | null };
 
 async function j<T>(r: Promise<Response>): Promise<T> {
   const res = await r;
@@ -8,7 +12,10 @@ async function j<T>(r: Promise<Response>): Promise<T> {
 }
 export const getNodes = () => j<NodeDef[]>(fetch("/api/nodes"));
 export const getStatus = () =>
-  j<{ llm_mode: "offline" | "live" | "none"; model: string | null }>(fetch("/api/status"));
+  j<RuntimeStatus>(fetch("/api/status"));
+export const setRuntimeMode = (mode: RuntimeMode) =>
+  j<RuntimeStatus>(fetch("/api/runtime-mode", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }) }));
 export const compileLoom = (blueprint: Loom, bar = "1m") =>
   j<{ ok: boolean; errors: { code: string; message: string; node_id?: string; port?: string; fix_hint?: string }[];
       certificate: Record<string, unknown> | null; order: string[] }>(
@@ -23,11 +30,31 @@ export const saveBlueprint = (blueprint: Loom) =>
 export const startRun = (body: Record<string, unknown>) =>
   j<{ run_id: string }>(fetch("/api/runs", { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+export const startLive = (body: Record<string, unknown>) =>
+  j<{ session_id: string; run_id: string }>(fetch("/api/live", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+export const stopLive = (sessionId: string) =>
+  j<{ session_id: string; status: string }>(
+    fetch(`/api/live/${sessionId}/stop`, { method: "POST" }));
 export const getRun = (id: string) => j<Record<string, any>>(fetch(`/api/runs/${id}`));
 export const listRuns = () => j<Record<string, any>[]>(fetch("/api/runs"));
-export const getCandles = (inst: string, bar: string, limit = 5000) =>
-  j<{ ts: number; open: number; high: number; low: number; close: number; volume: number }[]>(
-    fetch(`/api/market/candles?inst=${encodeURIComponent(inst)}&bar=${bar}&limit=${limit}`));
+export const getMarketCatalog = () =>
+  j<MarketWindow[]>(fetch("/api/market/catalog"));
+export const getCandles = (
+  inst: string,
+  bar: string,
+  opts: number | { start?: number; end?: number; limit?: number } = 5000,
+) => {
+  const limit = typeof opts === "number" ? opts : opts.limit ?? 5000;
+  const q = new URLSearchParams();
+  q.set("inst", inst);
+  q.set("bar", bar);
+  q.set("limit", String(limit));
+  if (typeof opts !== "number" && opts.start !== undefined) q.set("start", String(opts.start));
+  if (typeof opts !== "number" && opts.end !== undefined) q.set("end", String(opts.end));
+  return j<{ ts: number; open: number; high: number; low: number; close: number; volume: number }[]>(
+    fetch(`/api/market/candles?${q.toString()}`));
+};
 export const getTrace = (runId: string, nodeId?: string, eventIdx?: number, limit = 200) => {
   const q = new URLSearchParams();
   if (nodeId) q.set("node_id", nodeId);
@@ -35,6 +62,8 @@ export const getTrace = (runId: string, nodeId?: string, eventIdx?: number, limi
   q.set("limit", String(limit));
   return j<Record<string, any>[]>(fetch(`/api/runs/${runId}/trace?${q}`));
 };
+export const getLiveAnalysis = (sessionId: string, limit = 200) =>
+  j<Record<string, any>[]>(fetch(`/api/live/${sessionId}/analysis?limit=${limit}`));
 
 // —— Eval / Evolve 端点（D4-T6，全 POST，返回对应 to_dict JSON，无 envelope）——
 import type { LadderReport, Board, AblationReport, Scorecard, Genealogy } from "./eval";

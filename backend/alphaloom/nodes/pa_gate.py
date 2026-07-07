@@ -28,6 +28,7 @@ from alphaloom.nodes.registry import node
     },
     outputs={"signal": PinType.SIGNAL},
     params={"min_atr": float},
+    optional_inputs={"ema", "atr"},
     cost=CostAnnotation(
         llm_calls_per_bar=0,
         max_tokens_per_call=0,

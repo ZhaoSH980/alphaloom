@@ -40,6 +40,7 @@ def test_compile_endpoint_ok_and_errors(client):
     body = r.json()
     assert r.status_code == 200 and body["ok"] is True
     assert body["certificate"]["deterministic_ratio"] == 1.0
+    assert client.post("/api/compile", json={"blueprint": loom, "bar": "30m"}).status_code == 200
     bad = dict(loom, edges=[e for e in loom["edges"]
                             if e["to"] != "exec.signal"] + [{"from": "cross.signal",
                                                              "to": "exec.signal"}])
@@ -65,12 +66,42 @@ def test_blueprints_list_get_save(client):
     if r2.status_code == 200:
         assert "/" not in r2.json()["id"] and ".." not in r2.json()["id"]
 
+def test_saving_blueprint_cannot_shadow_preset_id(client):
+    preset = client.get("/api/blueprints/ema_cross_v1").json()
+    r = client.post("/api/blueprints", json={"blueprint": dict(preset, name="shadow")})
+    assert r.status_code == 409
+    ids = [b["id"] for b in client.get("/api/blueprints").json()]
+    assert len(ids) == len(set(ids))
+
 def test_market_candles_window(client):
     r = client.get("/api/market/candles",
                    params={"inst": "BTC-USDT-SWAP", "bar": "1m", "limit": 50})
     rows = r.json()
     assert r.status_code == 200 and len(rows) == 50
     assert list(rows[0]) == ["ts", "open", "high", "low", "close", "volume"]
+
+def test_market_catalog_exposes_available_backtest_windows(client):
+    r = client.get("/api/market/catalog")
+    assert r.status_code == 200
+    rows = r.json()
+    bars = [row["bar"] for row in rows if row["inst"] == "BTC-USDT-SWAP"]
+    assert bars == ["1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "6H", "12H", "1D"]
+    one = next(row for row in rows if row["bar"] == "1m")
+    assert one == {
+        "inst": "BTC-USDT-SWAP",
+        "bar": "1m",
+        "start_ms": 0,
+        "end_ms": 23_940_000,
+        "count": 400,
+    }
+
+def test_market_candles_can_return_derived_5m_window(client):
+    r = client.get("/api/market/candles",
+                   params={"inst": "BTC-USDT-SWAP", "bar": "5m", "limit": 3})
+    rows = r.json()
+    assert r.status_code == 200
+    assert len(rows) == 3
+    assert rows[1]["ts"] - rows[0]["ts"] == 300_000
 
 def test_run_lifecycle_and_trace(client):
     loom = json.loads((REPO / "blueprints" / "ema_cross.loom").read_text(encoding="utf-8"))
@@ -92,6 +123,7 @@ def test_run_lifecycle_and_trace(client):
     tr = client.get(f"/api/runs/{run_id}/trace", params={"node_id": "risk", "limit": 5})
     assert tr.status_code == 200 and len(tr.json()) == 5
     assert tr.json()[0]["node_id"] == "risk" and "outputs" in tr.json()[0]
+    assert run_id not in client.app.state.service._threads
 
 def test_run_compile_failure_422(client):
     loom = json.loads((REPO / "blueprints" / "ema_cross.loom").read_text(encoding="utf-8"))
@@ -115,6 +147,8 @@ def test_spa_fallback_no_path_traversal(tmp_path):
     for evil in ["..%2FSECRET.txt", "%2e%2e%2fSECRET.txt", "..%2F..%2FSECRET.txt"]:
         r = c.get(f"/{evil}")
         assert "TOP-SECRET" not in r.text, evil
+    fallback = c.get("/anything/deep")
+    assert fallback.headers["cache-control"] == "no-store"
     assert "ok" in c.get("/anything/deep").text   # SPA fallback 正常路径不受影响
 
 def test_run_window_bounds_rejected(client):

@@ -166,7 +166,8 @@ export default function CopilotPanel(props: CopilotPanelProps) {
       onPreview({ loom, diff, source: "blueprint" });
       push("agent", notes.length ? notes[notes.length - 1] : "blueprint ready");
     } catch (e) {
-      setErr(errText(e)); push("agent", `${t("copilotError")}: ${errText(e)}`);
+      const msg = errText(e);
+      setErr(msg); push("agent", `${t("copilotError")}: ${msg}`);
     } finally { setBusy(false); }
   };
 
@@ -191,7 +192,8 @@ export default function CopilotPanel(props: CopilotPanelProps) {
       onPreview({ loom, diff, source: "optimize" });
       push("agent", notes.length ? notes[notes.length - 1] : "optimization ready");
     } catch (e) {
-      setErr(errText(e)); push("agent", `${t("copilotError")}: ${errText(e)}`);
+      const msg = errText(e);
+      setErr(msg); push("agent", `${t("copilotError")}: ${msg}`);
     } finally { setBusy(false); }
   };
 
@@ -278,8 +280,12 @@ function errText(e: unknown): string {
       try {
         const parsed = JSON.parse(body);
         const detail = parsed.detail ?? parsed;
-        return typeof detail === "string" ? detail
-          : detail.message ?? JSON.stringify(detail);
+        if (typeof detail === "string") return detail;
+        const parts = [];
+        if (detail.error) parts.push(`[${detail.error}]`);
+        if (detail.message) parts.push(detail.message);
+        if (detail.hint) parts.push(`Hint: ${detail.hint}`);
+        return parts.length ? parts.join(" ") : JSON.stringify(detail);
       } catch { return body; }
     }
   }

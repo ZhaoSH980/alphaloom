@@ -2,13 +2,14 @@
 import { createChart, type IChartApi } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
-export default function EquityChart({ curve }: { curve: [number, number][] }) {
+export default function EquityChart({ curve, height = 160 }: { curve: [number, number][]; height?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi>();
   useEffect(() => {
     if (!ref.current) return;
-    chart.current = createChart(ref.current, {
-      height: 160, layout: { background: { color: "transparent" }, textColor: "#94a3b8" },
+    const container = ref.current;
+    chart.current = createChart(container, {
+      height, layout: { background: { color: "transparent" }, textColor: "#94a3b8" },
       grid: { vertLines: { visible: false }, horzLines: { color: "#101a33" } },
       timeScale: { timeVisible: true },
     });
@@ -17,9 +18,15 @@ export default function EquityChart({ curve }: { curve: [number, number][] }) {
     });
     s.setData(curve.map(([ts, eq]) => ({ time: (ts / 1000) as never, value: eq })));
     chart.current.timeScale().fitContent();
-    const ro = new ResizeObserver(() => chart.current?.applyOptions({ width: ref.current!.clientWidth }));
-    ro.observe(ref.current);
-    return () => { ro.disconnect(); chart.current?.remove(); };
-  }, [curve]);
+    const ro = new ResizeObserver(() => {
+      chart.current?.applyOptions({ width: container.clientWidth });
+    });
+    ro.observe(container);
+    return () => {
+      ro.disconnect();
+      chart.current?.remove();
+      chart.current = undefined;
+    };
+  }, [curve, height]);
   return <div ref={ref} className="w-full" />;
 }

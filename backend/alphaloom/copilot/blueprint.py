@@ -127,7 +127,7 @@ def text_to_blueprint(
     last_feedback = ""
 
     for attempt in range(1, max_retries + 1):
-        response = llm.chat(messages, temperature=temperature)
+        response = llm.chat(messages, temperature=temperature, max_tokens=4096)
         loom = _extract_json(_content(response))
         if loom is None:
             last_feedback = "Your reply was not a single JSON object. Reply with ONLY the loom JSON."
@@ -173,7 +173,7 @@ def _fallback_summary(loom: dict) -> str:
 def explain(loom: dict, llm, *, temperature: float = 0.2) -> str:
     """自然语言解释图在干什么。返回**非空**叙述（LLM 空返回则确定性兜底）。"""
     messages = _prompts.build_explain_messages(loom)
-    response = llm.chat(messages, temperature=temperature)
+    response = llm.chat(messages, temperature=temperature, max_tokens=1024)
     text = _content(response).strip()
     return text or _fallback_summary(loom)
 
@@ -241,7 +241,7 @@ def optimize(
     last_feedback = ""
 
     for attempt in range(1, max_retries + 1):
-        response = llm.chat(messages, temperature=temperature)
+        response = llm.chat(messages, temperature=temperature, max_tokens=4096)
         mutated = _extract_json(_content(response))
         if mutated is None:
             last_feedback = "Reply was not a single JSON object. Reply with ONLY the mutated loom JSON."

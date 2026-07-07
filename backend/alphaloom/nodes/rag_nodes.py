@@ -31,6 +31,7 @@ def _corpus():
     inputs={"candle": PinType.CANDLE, "query": PinType.SERIES},
     outputs={"citations": PinType.SERIES},
     params={"query": str, "top_k": int},
+    optional_inputs={"query"},
     cost=CostAnnotation(
         llm_calls_per_bar=0,
         max_tokens_per_call=0,
@@ -70,6 +71,7 @@ def _format_citation(hit) -> str:
     category="rag",
     inputs={"signal": PinType.SIGNAL, "citations": PinType.SERIES},
     outputs={"signal": PinType.SIGNAL},
+    optional_inputs={"citations"},
     cost=CostAnnotation(
         llm_calls_per_bar=0,
         max_tokens_per_call=0,

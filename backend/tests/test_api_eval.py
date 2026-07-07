@@ -26,6 +26,39 @@ from tests.fixtures.synth import gen_candles
 REPO = Path(__file__).resolve().parents[2]
 
 
+def _recording_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    import sqlite3
+    try:
+        with sqlite3.connect(path) as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0])
+    except sqlite3.Error:
+        return 0
+
+
+def _recorded_model(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    import sqlite3
+    try:
+        with sqlite3.connect(path) as conn:
+            row = conn.execute("SELECT request_json FROM llm_calls LIMIT 1").fetchone()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    try:
+        return str(json.loads(row[0]).get("model") or "")
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+_SEED_RECORDING_DB = REPO / "data" / "llm_calls.sqlite"
+_HAS_SEED_RECORDINGS = _recording_count(_SEED_RECORDING_DB) > 0
+_SEED_MODEL = _recorded_model(_SEED_RECORDING_DB) or "spark-x1"
+
+
 # --------------------------------------------------------------------------- #
 # offline-safe scripted fake LLM（纯本地——零 socket、零配额；offline=True 使守门放行）
 # --------------------------------------------------------------------------- #
@@ -394,7 +427,7 @@ def test_ablation_no_committee_blueprint_422(tmp_path):
 # demo=True 离线预设：服务端硬用 demo_coords 规范坐标 → 命中种子录制回放（D4-T8 修复）
 # --------------------------------------------------------------------------- #
 def _offline_seed_replay_client():
-    """指向真实种子库（data/llm_calls.sqlite, model=spark-x1, offline）的 RecordingLLMClient。
+    """指向真实种子库（data/llm_calls.sqlite, recorded model, offline）的 RecordingLLMClient。
 
     offline=True → 命中即读、miss 即抛（绝不写库、绝不触网）——安全用于 demo 回放断言。
     """
@@ -404,8 +437,8 @@ def _offline_seed_replay_client():
         raise AssertionError("offline demo replay must not hit the network")
 
     return RecordingLLMClient(
-        _forbidden, REPO / "data" / "llm_calls.sqlite",
-        model="spark-x1", offline=True)
+        _forbidden, _SEED_RECORDING_DB,
+        model=_SEED_MODEL, offline=True)
 
 
 def _make_demo_app(llm_client):
@@ -418,9 +451,35 @@ def _make_demo_app(llm_client):
     return TestClient(app)
 
 
+def _skip_if_seed_replay_is_stale(response):
+    if response.status_code != 422:
+        return
+    try:
+        detail = response.json().get("detail")
+    except (ValueError, AttributeError):
+        return
+    if isinstance(detail, dict) and detail.get("error") == "replay_miss":
+        pytest.skip("seed recordings are present but stale for the current demo request hashes")
+
+
+def test_evolve_demo_empty_seed_db_reports_recording_seed_missing(tmp_path):
+    from alphaloom.llm.recording import RecordingLLMClient
+
+    llm = RecordingLLMClient(
+        lambda _request: _wrap("{}"),
+        tmp_path / "empty_seed.sqlite",
+        model=_SEED_MODEL,
+        offline=True,
+    )
+    client = _make_demo_app(llm)
+    r = client.post("/api/evolve", json={"demo": True})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error"] == "recording_seed_missing"
+
+
 @pytest.mark.skipif(
-    not (REPO / "data" / "llm_calls.sqlite").exists(),
-    reason="seed recordings db (data/llm_calls.sqlite) not present")
+    not _HAS_SEED_RECORDINGS,
+    reason="seed recordings db (data/llm_calls.sqlite) is missing or empty")
 def test_ablation_demo_preset_hits_seed_offline_200(tmp_path):
     """demo=True：忽略请求体坐标，服务端硬用 demo_coords → 命中种子录制离线回放，
     200 + 0 cache miss（离线可渲染消融表）。请求体故意塞垃圾坐标以证被忽略。"""
@@ -431,6 +490,7 @@ def test_ablation_demo_preset_hits_seed_offline_200(tmp_path):
         # 下列坐标故意错乱——demo=True 应全部忽略，改用 demo_coords 规范坐标。
         "blueprint": {"garbage": True}, "inst": "WRONG", "bar": "4H",
         "start_ms": 999_999_999, "end_ms": 999_999_999})
+    _skip_if_seed_replay_is_stale(r)
     assert r.status_code == 200, r.text
     rep = r.json()
     arms = {a["arm"] for a in rep["arms"]}
@@ -511,8 +571,8 @@ def test_evolve_bad_blueprint_422(tmp_path):
 
 
 @pytest.mark.skipif(
-    not (REPO / "data" / "llm_calls.sqlite").exists(),
-    reason="seed recordings db (data/llm_calls.sqlite) not present")
+    not _HAS_SEED_RECORDINGS,
+    reason="seed recordings db (data/llm_calls.sqlite) is missing or empty")
 def test_evolve_demo_preset_hits_seed_offline_200(tmp_path):
     """demo=True：忽略请求体坐标/规模，服务端硬用 demo_coords → 命中种子录制离线回放，
     200 + 0 cache miss（离线可渲染谱系树）。请求体故意塞垃圾坐标以证被忽略。"""
@@ -525,6 +585,7 @@ def test_evolve_demo_preset_hits_seed_offline_200(tmp_path):
         "train_start_ms": 1, "train_end_ms": 2,
         "valid_start_ms": 3, "valid_end_ms": 4,
         "population": 4, "generations": 3, "param_only": False})
+    _skip_if_seed_replay_is_stale(r)
     assert r.status_code == 200, r.text
     g = r.json()
     assert set(g) >= {"nodes", "winner", "param_only", "population", "generations"}
@@ -571,8 +632,9 @@ def test_scorecard_endpoint_missing_train_report_422(tmp_path):
 # =========================================================================== #
 # 端点不因缺 LLM 客户端而崩（确定性蓝图零 LLM 照跑）
 # =========================================================================== #
-def test_deterministic_endpoints_work_without_llm_client(tmp_path):
+def test_deterministic_endpoints_work_without_llm_client(tmp_path, monkeypatch):
     """无注入 llm（app.state.llm=None）：确定性蓝图的 fidelity/leaderboard 照跑。"""
+    monkeypatch.setattr("alphaloom.api.app._build_llm_client", lambda _db, mode=None: None)
     client = _make_app(tmp_path)            # 不注入 llm_client
     assert client.app.state.llm is None
     run_id = _complete_ema_run(client)

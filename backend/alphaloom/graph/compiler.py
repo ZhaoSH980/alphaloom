@@ -143,6 +143,17 @@ def compile_blueprint(bp: BlueprintSpec, *, bars_per_day: int = 1440) -> Compile
                 fix_hint=_HINTS.get(t_in, f"Produce a {t_in.value} value upstream.")))
             continue
         bindings[e.dst.node_id].append(InputBinding(e.dst.port, e.src.node_id, e.src.port, e.feedback))
+    for n in bp.nodes:
+        optional = getattr(defs[n.id], "optional_inputs", frozenset())
+        for port, pin in defs[n.id].inputs.items():
+            if port in optional:
+                continue
+            if (n.id, port) not in taken:
+                errors.append(CompileError(
+                    "MISSING_INPUT",
+                    f"input port {n.id}.{port} expects {pin.value} but is not wired",
+                    node_id=n.id, port=port,
+                    fix_hint="Connect this input to an upstream output of the same pin type."))
     if errors:
         return CompileResult(False, errors)
 

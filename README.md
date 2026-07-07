@@ -3,7 +3,9 @@
 <img src="docs/assets/alphaloom-logo-primary.png" alt="AlphaLoom" width="300">
 
 <p>
-  <strong>English</strong> |
+  Language:
+  <strong>English</strong>
+  ·
   <a href="README.zh-CN.md">中文</a>
 </p>
 
@@ -11,7 +13,7 @@
 
 **The graph IS the agent.**
 
-Agent-native quant trading: a `.loom` visual blueprint compiles into a typed, auditable, replayable trading agent.
+An agent-native trading workbench where a `.loom` visual blueprint compiles into a typed, costed, replayable, and falsifiable trading agent.
 
 [![CI](https://github.com/ZhaoSH980/alphaloom/actions/workflows/ci.yml/badge.svg)](https://github.com/ZhaoSH980/alphaloom/actions/workflows/ci.yml)
 &nbsp;![backend](https://img.shields.io/badge/backend-pytest-2ea043?style=flat-square)
@@ -23,17 +25,60 @@ Agent-native quant trading: a `.loom` visual blueprint compiles into a typed, au
 
 <img src="docs/assets/architecture-loop.gif" alt="AlphaLoom animated compile-gated agent loop" width="100%">
 
-**Draw a graph. Compile the guardrails. Replay every decision. Score it on real market data.**
+**Draw the gate graph. Compile the contracts. Replay every bar. Judge the agent with market evidence.**
 
 </div>
 
+## What It Is
+
+AlphaLoom is built for an AI Agent Engineer demo: it treats a trading strategy as an editable agent blueprint, not as hidden prompt glue. A blueprint can add or remove deterministic gates, LLM committee nodes, RAG/citation checks, reflection memory, position sizing, and execution guards. The compiler then proves the legal order path before runtime.
+
+It is a research/demo system, not financial advice and not an alpha claim.
+
 ## One Click Demo
+
+Double-click:
 
 ```bat
 START_ALPHALOOM.cmd
 ```
 
-Opens `http://127.0.0.1:8000/#/studio`, builds what is missing, runs offline replay, and spends zero LLM quota.
+The launcher creates missing dependencies, builds the frontend, prepares the deterministic demo database, starts the backend, and opens:
+
+```text
+http://127.0.0.1:8000/?alphaloom=...#/studio
+```
+
+Default mode is **Offline**: recorded LLM calls, recorded market data, zero network calls, zero LLM quota.
+
+## Runtime Modes
+
+The header can switch modes at any time:
+
+| Mode | Use it for | Requires |
+|---|---|---|
+| Offline | Safe demos, deterministic replay, committed iFlytek/seed recordings | Nothing |
+| Live | Real OpenAI-compatible LLM calls from the UI | `.env` with `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
+| No LLM | Deterministic blueprints, compiler checks, market-only backtests | Nothing |
+
+For Live mode:
+
+```env
+LLM_BASE_URL=https://your-openai-compatible-endpoint/v1
+LLM_API_KEY=...
+LLM_MODEL=astron-code-latest
+```
+
+Restart `START_ALPHALOOM.cmd`, then switch `Offline -> Live` in the top-right mode control. Live calls spend real quota.
+
+## Product Surface
+
+| Surface | What to show | Why it matters |
+|---|---|---|
+| Studio | Editable `.loom` blueprint, type edges, cost certificate, Copilot diff | The agent is the graph. You can swap gates or add LLM components. |
+| Live Desk | PA_Agent-style paper-live screen: blueprint left, candles center, diagnosis/gates/reflection right | The graph runs bar by bar, so the demo feels like a live trading desk. |
+| Terminal | Run picker, trace explorer, node I/O, committee/reflection evidence | Every decision is replayable and auditable after the run. |
+| Eval Lab | Fidelity ladder, scorecard, leaderboard, ablations, evolution genealogy | Results face harsher fills and baselines instead of a persuasive transcript. |
 
 ## Blueprint Features
 
@@ -43,7 +88,7 @@ Opens `http://127.0.0.1:8000/#/studio`, builds what is missing, runs offline rep
 
 <img src="docs/assets/feature-cost-cert.svg" alt="Static cost certificate diagram" width="100%"><br>
 <strong>Cost is known before runtime.</strong><br>
-The compiler emits LLM calls per bar, token ceiling, latency class, and deterministic ratio.
+The compiler emits LLM calls per bar, token ceiling, latency class, deterministic ratio, and legal execution path.
 
 <img src="docs/assets/feature-replay-loop.svg" alt="Offline replay loop diagram" width="100%"><br>
 <strong>Demos are deterministic.</strong><br>
@@ -51,7 +96,27 @@ Recorded LLM calls replay from hashed requests: same prompts, same responses, ze
 
 <img src="docs/assets/feature-eval-lab.svg" alt="Falsifiable evaluation stack diagram" width="100%"><br>
 <strong>Evaluation is falsifiable.</strong><br>
-Real candles, fidelity ladder, baselines, risk sensitivity, and evolution genealogy judge the graph.
+Real candles, fill-model ladder, baselines, risk sensitivity, ablation, and genealogy judge the graph.
+
+## Backtest And Replay
+
+Backtests are launched from Studio or Live Desk by choosing:
+
+| Control | Meaning |
+|---|---|
+| Blueprint | The compiled `.loom` graph to run |
+| Market / bar | Instrument and candle interval from the local market catalog |
+| Start / end | Exact replay window; charts only display this selected range |
+| Cash / fee | Initial capital and transaction-cost assumption |
+| Speed | `1x`, `4x`, or instant replay |
+
+During a run, the chart cursor reveals candles, fills, equity, and active graph nodes in replay order. The backtest engine uses next-bar-open fills, attached stops, EOD settlement, and no look-ahead reads; Eval Lab can then replay the same fills under harsher fidelity assumptions.
+
+## Copilot Role
+
+Copilot can generate, explain, optimize, and repair blueprints from natural language, but it does not bypass the compiler. Proposed changes appear as a diff, then must compile through the typed graph before any backtest or execution path is legal.
+
+This keeps the LLM useful as a strategy author while the system remains a gate-driven trading runtime.
 
 ## Real Market Smoke Test
 
@@ -69,11 +134,22 @@ Same blueprint, same type gate, public OKX candles:
 
 This is a smoke test, not an alpha claim. Reproduction notes live in [`docs/real-data-smoke-test.md`](docs/real-data-smoke-test.md).
 
+## Reflection Ablation
+
+A paired smoke ablation toggles the reflection loop while keeping the gate path intact. The point is behavioral evidence, not a universal return claim: does the learning loop change trading outcomes in a measurable way?
+
+| Variant | Trades | Return | Win rate | Max drawdown | Profit factor |
+|---|---:|---:|---:|---:|---:|
+| Closed-loop learning, reflection on | 9 | **+0.90%** | **66.7%** | **4.65%** | **1.36** |
+| No-reflection ablation | 5 | **-5.64%** | **0.0%** | 6.78% | 0.0 |
+
+In this paired run, removing reflection turned a small positive result into five losing trades. That makes reflection visible as a testable system component rather than a decorative prompt transcript.
+
 ## Visual Proof
 
-<strong>Preset Blueprint Studio.</strong> The first image is a clean render of the committed `agent_committee_v1` preset blueprint, including all 13 nodes and 19 typed edges.
+<strong>Preset Blueprint Studio.</strong> The first image shows the committed `agent_committee_v1` preset as a two-stage gate protocol: diagnose, short-circuit weak setups, validate orders, stamp RiskGate, then execute or replay.
 
-<img src="docs/screenshots/studio.png" alt="Blueprint Studio with typed graph and cost certificate" width="100%">
+<img src="docs/screenshots/studio.png" alt="Two-stage gate protocol blueprint with diagnosis gate, order gate, RiskGate stamp, execution, replay, and reflection" width="100%">
 
 <strong>Realtime Offline Player.</strong> Generated from the same real OKX SOL replay: progress, equity, and fill events advance from recorded runtime data.
 
@@ -103,9 +179,9 @@ This is a smoke test, not an alpha claim. Reproduction notes live in [`docs/real
 |---|---|---|
 | 1 | Studio graph | The agent is the blueprint, not hidden prompt glue. |
 | 2 | `risk_gate -> execute_order` | Risk control is enforced by the compiler. |
-| 3 | Cost certificate | LLM cost and determinism are visible before the run. |
-| 4 | Offline player | Fills, equity, citations, and traces are inspectable offline in a realtime-style replay. |
-| 5 | Eval Lab | Backtest results face baselines and harsher fill models. |
+| 3 | Live Desk | The selected graph runs against candles with active gates visible. |
+| 4 | Terminal replay | Fills, equity, citations, node I/O, and reflection are inspectable. |
+| 5 | Eval Lab | Results face baselines, ablations, and harsher fill models. |
 
 <details>
 <summary><strong>Manual startup</strong></summary>
@@ -134,11 +210,11 @@ backend\.venv\Scripts\python.exe -m uvicorn alphaloom.serve:app --port 8000 --ap
 
 | Layer | What it does |
 |---|---|
-| Blueprint compiler | `.loom` JSON to typed graph, topological plan, and cost certificate. |
-| Event runtime | Wave execution, deterministic replay, breakpoints, full node I/O recording. |
+| Blueprint compiler | `.loom` JSON to typed graph, topological plan, cost certificate, and legal order path. |
+| Event runtime | Wave execution, deterministic replay, breakpoints, WebSocket progress, full node I/O recording. |
 | Backtest engine | Next-bar-open fills, attached stops, EOD settlement, no look-ahead reads. |
 | Agent nodes | `LLMAnalyst`, `Committee`, deterministic gates, BM25 RAG, citation checks, reflector, memory. |
-| Copilot | Natural language to blueprint, compile-error self-repair, explain, optimize. |
+| Copilot | Natural language to blueprint, compile-error self-repair, explain, optimize, apply-and-run. |
 | Sandbox | AST-whitelisted custom nodes with no LLM handle and no ability to forge the risk stamp. |
 | Eval Lab | Fidelity ladder, scorecard, leaderboard, risk sensitivity, committee ablation, evolution genealogy. |
 

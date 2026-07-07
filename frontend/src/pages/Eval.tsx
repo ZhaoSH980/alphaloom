@@ -18,6 +18,7 @@ import ScorecardPanel from "../components/ScorecardPanel";
 import LeaderboardTable from "../components/LeaderboardTable";
 import AblationTable from "../components/AblationTable";
 import GenealogyTree from "../components/GenealogyTree";
+import RunPicker, { type RunPickerItem } from "../components/RunPicker";
 import { useLang } from "../lib/i18n";
 
 function errText(e: unknown): string {
@@ -172,17 +173,12 @@ export default function Eval() {
         <span className="text-[10px] text-slate-500">{t("evalIntro")}</span>
       </div>
 
-      {/* run 选择器 */}
-      <div className="flex gap-2 flex-wrap items-center">
-        <span className="hud-label">{t("evalRun")}</span>
-        {runs.map((r) => (
-          <button key={r.run_id} onClick={() => setSel(r.run_id)}
-                  className={`px-2 py-1 rounded text-xs font-mono border ${sel === r.run_id
-                    ? "border-loom-gold text-loom-gold" : "border-edge text-slate-400"}
-                    ${r.status !== "completed" ? "opacity-50" : ""}`}>
-            …{r.run_id.slice(-6)} · {r.blueprint_id}
-          </button>))}
-      </div>
+      <RunPicker
+        runs={runs as RunPickerItem[]}
+        selectedId={sel}
+        label={t("evalRun")}
+        onSelect={setSel}
+      />
 
       {/* 1. 保真度阶梯（自动跑，零 LLM） */}
       <Block title={t("fidelityTitle")} err={ladderErr}

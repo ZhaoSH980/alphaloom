@@ -1,5 +1,5 @@
 import pytest
-from alphaloom.llm.client import LLMConfig, OFFLINE_DEFAULTS
+from alphaloom.llm.client import LLMConfig, LLMConfigError, OFFLINE_DEFAULTS
 from alphaloom.llm.recording import RecordingLLMClient, ReplayMissError
 from alphaloom.llm.retry import with_retry
 from alphaloom.sandbox.audit import AuditLog
@@ -17,6 +17,67 @@ def test_offline_config_defaults(monkeypatch):
     cfg = LLMConfig.from_env(dotenv_path=None)
     assert cfg.model == OFFLINE_DEFAULTS["LLM_MODEL"]
     assert cfg.base_url == OFFLINE_DEFAULTS["LLM_BASE_URL"]
+
+def test_forced_live_config_ignores_offline_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("ALPHALOOM_OFFLINE", "1")
+    monkeypatch.setenv("LLM_BASE_URL", "https://spark.example/v1")
+    monkeypatch.setenv("LLM_API_KEY", "secret")
+    monkeypatch.setenv("LLM_MODEL", "astron-code-latest")
+
+    cfg = LLMConfig.from_env(dotenv_path=tmp_path / "no.env", offline=False)
+
+    assert cfg.base_url == "https://spark.example/v1"
+    assert cfg.api_key == "secret"
+    assert cfg.model == "astron-code-latest"
+
+def test_live_config_loads_backend_dotenv_by_default(monkeypatch, tmp_path):
+    for key in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(tmp_path)
+    env_dir = tmp_path / "backend"
+    env_dir.mkdir()
+    (env_dir / ".env").write_text(
+        "LLM_BASE_URL=https://spark.example/v1\n"
+        "LLM_API_KEY=test-key\n"
+        "LLM_MODEL=astron-code-latest\n",
+        encoding="utf-8")
+
+    cfg = LLMConfig.from_env(offline=False)
+
+    assert cfg.base_url == "https://spark.example/v1"
+    assert cfg.api_key == "test-key"
+    assert cfg.model == "astron-code-latest"
+
+def test_live_config_can_reload_dotenv_over_blank_process_values(monkeypatch, tmp_path):
+    monkeypatch.setenv("LLM_BASE_URL", "")
+    monkeypatch.setenv("LLM_API_KEY", "")
+    monkeypatch.setenv("LLM_MODEL", "")
+    env = tmp_path / ".env"
+    env.write_text(
+        "LLM_BASE_URL=https://spark.example/v1\n"
+        "LLM_API_KEY=test-key\n"
+        "LLM_MODEL=astron-code-latest\n",
+        encoding="utf-8")
+
+    cfg = LLMConfig.from_env(dotenv_path=env, offline=False,
+                             dotenv_override=True)
+
+    assert cfg.base_url == "https://spark.example/v1"
+    assert cfg.api_key == "test-key"
+    assert cfg.model == "astron-code-latest"
+
+def test_live_config_error_lists_missing_keys(monkeypatch, tmp_path):
+    for key in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+
+    with pytest.raises(LLMConfigError) as exc:
+        LLMConfig.from_env(dotenv_path=tmp_path / "missing.env", offline=False)
+
+    message = str(exc.value)
+    assert "LLM_BASE_URL" in message
+    assert "LLM_API_KEY" in message
+    assert "LLM_MODEL" in message
+    assert "missing.env" in message
 
 def test_record_then_replay(tmp_path):
     canned = {"choices": [{"message": {"content": "hi"}}]}

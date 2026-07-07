@@ -2,43 +2,344 @@
   "id": "agent_committee_v1",
   "name": "Agent Committee (LLM decision + RAG + reflection)",
   "nodes": [
-    {"id": "feed", "type": "candle_feed", "params": {"inst": "BTC-USDT-SWAP", "bar": "1m"}},
-    {"id": "ema", "type": "ema", "params": {"period": 20}},
-    {"id": "atr", "type": "atr", "params": {"period": 14}},
-    {"id": "kb", "type": "knowledge_retrieve", "params": {"query": "trend breakout risk", "top_k": 2}},
-    {"id": "committee", "type": "committee", "params": {"atr_mult": 2.0}},
-    {"id": "cite_gate", "type": "require_citations", "params": {}},
-    {"id": "xp", "type": "experience_retrieve", "params": {"top_k": 3}},
-    {"id": "reflector", "type": "reflector", "params": {}},
-    {"id": "xp_write", "type": "experience_write", "params": {}},
-    {"id": "sizer", "type": "position_sizer", "params": {"risk_pct": 0.02}},
-    {"id": "risk", "type": "risk_gate", "params": {"max_qty": 100.0, "require_stop": true}},
-    {"id": "exec", "type": "execute_order", "params": {}},
-    {"id": "kill", "type": "kill_switch", "params": {"max_drawdown_pct": 0.25}}
+    {
+      "id": "feed",
+      "type": "candle_feed",
+      "params": {
+        "inst": "BTC-USDT-SWAP",
+        "bar": "1m"
+      }
+    },
+    {
+      "id": "ema",
+      "type": "ema",
+      "params": {
+        "period": 20
+      }
+    },
+    {
+      "id": "atr",
+      "type": "atr",
+      "params": {
+        "period": 14
+      }
+    },
+    {
+      "id": "kb",
+      "type": "knowledge_retrieve",
+      "params": {
+        "query": "trend breakout risk",
+        "top_k": 2
+      }
+    },
+    {
+      "id": "committee",
+      "type": "committee",
+      "params": {
+        "atr_mult": 2
+      }
+    },
+    {
+      "id": "cite_gate",
+      "type": "require_citations",
+      "params": {}
+    },
+    {
+      "id": "xp",
+      "type": "experience_retrieve",
+      "params": {
+        "top_k": 3
+      }
+    },
+    {
+      "id": "reflector",
+      "type": "reflector",
+      "params": {}
+    },
+    {
+      "id": "xp_write",
+      "type": "experience_write",
+      "params": {}
+    },
+    {
+      "id": "sizer",
+      "type": "position_sizer",
+      "params": {
+        "risk_pct": 0.02
+      }
+    },
+    {
+      "id": "risk",
+      "type": "risk_gate",
+      "params": {
+        "max_qty": 100,
+        "require_stop": true
+      }
+    },
+    {
+      "id": "exec",
+      "type": "execute_order",
+      "params": {}
+    },
+    {
+      "id": "kill",
+      "type": "kill_switch",
+      "params": {
+        "max_drawdown_pct": 0.25
+      }
+    }
   ],
   "edges": [
-    {"from": "feed.out", "to": "ema.candle"},
-    {"from": "feed.out", "to": "atr.candle"},
-    {"from": "feed.out", "to": "kb.candle"},
-    {"from": "feed.out", "to": "committee.candle"},
-    {"from": "atr.value", "to": "committee.atr"},
-    {"from": "committee.signal", "to": "cite_gate.signal"},
-    {"from": "kb.citations", "to": "cite_gate.citations"},
-    {"from": "feed.out", "to": "xp.candle"},
-    {"from": "ema.value", "to": "xp.ema"},
-    {"from": "atr.value", "to": "xp.atr"},
-    {"from": "cite_gate.signal", "to": "reflector.signal"},
-    {"from": "ema.value", "to": "reflector.ema"},
-    {"from": "atr.value", "to": "reflector.atr"},
-    {"from": "reflector.verdict", "to": "xp_write.verdict"},
-    {"from": "cite_gate.signal", "to": "sizer.signal"},
-    {"from": "feed.out", "to": "sizer.candle"},
-    {"from": "sizer.sized", "to": "risk.signal"},
-    {"from": "risk.stamped", "to": "exec.signal"},
-    {"from": "feed.out", "to": "kill.candle"}
+    {
+      "from": "feed.out",
+      "to": "ema.candle"
+    },
+    {
+      "from": "feed.out",
+      "to": "atr.candle"
+    },
+    {
+      "from": "feed.out",
+      "to": "kb.candle"
+    },
+    {
+      "from": "feed.out",
+      "to": "committee.candle"
+    },
+    {
+      "from": "atr.value",
+      "to": "committee.atr"
+    },
+    {
+      "from": "committee.signal",
+      "to": "cite_gate.signal"
+    },
+    {
+      "from": "kb.citations",
+      "to": "cite_gate.citations"
+    },
+    {
+      "from": "feed.out",
+      "to": "xp.candle"
+    },
+    {
+      "from": "ema.value",
+      "to": "xp.ema"
+    },
+    {
+      "from": "atr.value",
+      "to": "xp.atr"
+    },
+    {
+      "from": "cite_gate.signal",
+      "to": "reflector.signal"
+    },
+    {
+      "from": "ema.value",
+      "to": "reflector.ema"
+    },
+    {
+      "from": "atr.value",
+      "to": "reflector.atr"
+    },
+    {
+      "from": "reflector.verdict",
+      "to": "xp_write.verdict"
+    },
+    {
+      "from": "cite_gate.signal",
+      "to": "sizer.signal"
+    },
+    {
+      "from": "feed.out",
+      "to": "sizer.candle"
+    },
+    {
+      "from": "sizer.sized",
+      "to": "risk.signal"
+    },
+    {
+      "from": "risk.stamped",
+      "to": "exec.signal"
+    },
+    {
+      "from": "feed.out",
+      "to": "kill.candle"
+    }
   ],
   "meta": {
     "preset": true,
-    "description_zh": "委员会 LLM 决策 + 知识库强制引用 + 经验检索 + 反思闭环写库（招牌演示蓝图）"
+    "description_zh": "委员会 LLM 决策 + 知识库强制引用 + 经验检索 + 反思闭环写库（招牌演示蓝图）",
+    "gateProtocol": {
+      "title": {
+        "en": "Agent committee gated blueprint",
+        "zh": "Agent 委员会门控蓝图"
+      },
+      "subtitle": {
+        "en": "A two-stage PA_Agent-style protocol: LLM diagnosis, evidence gate, sizing, RiskGate, execution, then reflection memory.",
+        "zh": "两阶段 PA_Agent 风格协议：LLM 诊断、证据门控、仓位计算、RiskGate、执行，再进入反思记忆。"
+      },
+      "evidence": {
+        "en": "candles + EMA + ATR + RAG citations + experience memory",
+        "zh": "K线 + EMA + ATR + RAG 引用 + 经验记忆"
+      },
+      "steps": [
+        {
+          "id": "inputs",
+          "tone": "data",
+          "eyebrow": {
+            "en": "Inputs",
+            "zh": "输入"
+          },
+          "title": {
+            "en": "Market context",
+            "zh": "市场上下文"
+          },
+          "body": {
+            "en": "price feed, indicators, citations, and memory are prepared before any decision",
+            "zh": "先准备价格、指标、引用和记忆，再进入决策"
+          },
+          "nodes": [
+            "feed",
+            "ema",
+            "atr",
+            "kb",
+            "xp"
+          ]
+        },
+        {
+          "id": "stage1",
+          "tone": "stage",
+          "eyebrow": {
+            "en": "Stage 1",
+            "zh": "阶段一"
+          },
+          "title": {
+            "en": "LLM market diagnosis",
+            "zh": "LLM 市场诊断"
+          },
+          "body": {
+            "en": "committee forms direction, confidence, and rationale from typed evidence",
+            "zh": "委员会基于类型化证据生成方向、置信度和理由"
+          },
+          "nodes": [
+            "committee"
+          ]
+        },
+        {
+          "id": "evidence_gate",
+          "tone": "gate",
+          "eyebrow": {
+            "en": "Gate 1",
+            "zh": "门 1"
+          },
+          "title": {
+            "en": "Evidence gate",
+            "zh": "证据门控"
+          },
+          "body": {
+            "en": "decision must carry citations before it can become an order candidate",
+            "zh": "决策必须带引用，才能成为订单候选"
+          },
+          "nodes": [
+            "cite_gate"
+          ]
+        },
+        {
+          "id": "stage2",
+          "tone": "stage",
+          "eyebrow": {
+            "en": "Stage 2",
+            "zh": "阶段二"
+          },
+          "title": {
+            "en": "Order shaping",
+            "zh": "订单成形"
+          },
+          "body": {
+            "en": "candidate signal is converted into sized risk-aware intent",
+            "zh": "候选信号被转换为带仓位的风险意图"
+          },
+          "nodes": [
+            "sizer"
+          ]
+        },
+        {
+          "id": "risk_gate",
+          "tone": "risk",
+          "eyebrow": {
+            "en": "Gate 2",
+            "zh": "门 2"
+          },
+          "title": {
+            "en": "RiskGate stamp",
+            "zh": "RiskGate 盖章"
+          },
+          "body": {
+            "en": "stop, quantity, exposure, and contract constraints are enforced",
+            "zh": "强制检查止损、数量、敞口和契约约束"
+          },
+          "nodes": [
+            "risk"
+          ]
+        },
+        {
+          "id": "runtime",
+          "tone": "exec",
+          "eyebrow": {
+            "en": "Runtime",
+            "zh": "运行时"
+          },
+          "title": {
+            "en": "Execute / simulate",
+            "zh": "执行 / 模拟"
+          },
+          "body": {
+            "en": "only stamped orders can reach the broker runtime",
+            "zh": "只有盖章订单能进入经纪商运行时"
+          },
+          "nodes": [
+            "exec"
+          ]
+        }
+      ],
+      "sidecars": [
+        {
+          "id": "kill_switch",
+          "tone": "fail",
+          "title": {
+            "en": "Portfolio kill switch",
+            "zh": "组合熔断"
+          },
+          "body": {
+            "en": "drawdown guard can stop trading independent of the LLM path",
+            "zh": "回撤保护可独立于 LLM 路径停止交易"
+          },
+          "nodes": [
+            "kill"
+          ]
+        },
+        {
+          "id": "reflection",
+          "tone": "loop",
+          "title": {
+            "en": "Replay + reflection memory",
+            "zh": "回放 + 反思记忆"
+          },
+          "body": {
+            "en": "recorded decisions are scored and written back as experience",
+            "zh": "记录的决策会被评分并写回经验库"
+          },
+          "nodes": [
+            "reflector",
+            "xp_write"
+          ]
+        }
+      ],
+      "invariant": {
+        "en": "Raw model or strategy output cannot enter execution until it passes position sizing and RiskGate stamping.",
+        "zh": "模型或策略的原始输出不能直接执行，必须先经过仓位计算和 RiskGate 盖章。"
+      }
+    }
   }
 }

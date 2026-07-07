@@ -2,29 +2,230 @@
   "id": "real_sol_breakout_demo_v1",
   "name": "Real OKX SOL Breakout Demo",
   "nodes": [
-    {"id": "feed", "type": "candle_feed", "params": {"inst": "SOL-USDT-SWAP", "bar": "1m"}},
-    {"id": "atr", "type": "atr", "params": {"period": 14}},
-    {"id": "scenario", "type": "scenario_gate", "params": {"lookback": 45, "cooldown": 10, "atr_mult": 2.5}},
-    {"id": "sizer", "type": "position_sizer", "params": {"risk_pct": 0.005}},
-    {"id": "risk", "type": "risk_gate", "params": {"max_qty": 100000.0, "require_stop": true}},
-    {"id": "exec", "type": "execute_order", "params": {}},
-    {"id": "kill", "type": "kill_switch", "params": {"max_drawdown_pct": 0.2}}
+    {
+      "id": "feed",
+      "type": "candle_feed",
+      "params": {
+        "inst": "SOL-USDT-SWAP",
+        "bar": "1m"
+      }
+    },
+    {
+      "id": "atr",
+      "type": "atr",
+      "params": {
+        "period": 14
+      }
+    },
+    {
+      "id": "scenario",
+      "type": "scenario_gate",
+      "params": {
+        "lookback": 45,
+        "cooldown": 10,
+        "atr_mult": 2.5
+      }
+    },
+    {
+      "id": "sizer",
+      "type": "position_sizer",
+      "params": {
+        "risk_pct": 0.005
+      }
+    },
+    {
+      "id": "risk",
+      "type": "risk_gate",
+      "params": {
+        "max_qty": 100000,
+        "require_stop": true
+      }
+    },
+    {
+      "id": "exec",
+      "type": "execute_order",
+      "params": {}
+    },
+    {
+      "id": "kill",
+      "type": "kill_switch",
+      "params": {
+        "max_drawdown_pct": 0.2
+      }
+    }
   ],
   "edges": [
-    {"from": "feed.out", "to": "atr.candle"},
-    {"from": "feed.out", "to": "scenario.candle"},
-    {"from": "atr.value", "to": "scenario.atr"},
-    {"from": "scenario.signal", "to": "sizer.signal"},
-    {"from": "feed.out", "to": "sizer.candle"},
-    {"from": "sizer.sized", "to": "risk.signal"},
-    {"from": "risk.stamped", "to": "exec.signal"},
-    {"from": "feed.out", "to": "kill.candle"}
+    {
+      "from": "feed.out",
+      "to": "atr.candle"
+    },
+    {
+      "from": "feed.out",
+      "to": "scenario.candle"
+    },
+    {
+      "from": "atr.value",
+      "to": "scenario.atr"
+    },
+    {
+      "from": "scenario.signal",
+      "to": "sizer.signal"
+    },
+    {
+      "from": "feed.out",
+      "to": "sizer.candle"
+    },
+    {
+      "from": "sizer.sized",
+      "to": "risk.signal"
+    },
+    {
+      "from": "risk.stamped",
+      "to": "exec.signal"
+    },
+    {
+      "from": "feed.out",
+      "to": "kill.candle"
+    }
   ],
   "meta": {
     "preset": true,
     "description": "Real-data smoke-test blueprint selected from an OKX public 1m SOL-USDT-SWAP scan. Demo window: 2026-06-25 04:12Z to 2026-06-26 04:12Z.",
     "data_source": "OKX public REST history-candles",
     "demo_start_ms": 1782360720000,
-    "demo_end_ms": 1782447120000
+    "demo_end_ms": 1782447120000,
+    "gateProtocol": {
+      "title": {
+        "en": "Real SOL smoke-test gate blueprint",
+        "zh": "真实 SOL 烟测门控蓝图"
+      },
+      "subtitle": {
+        "en": "The profitable demo path is shown as a typed scenario gate over real OKX candles, with honest risk stamping.",
+        "zh": "盈利演示路径被表达为真实 OKX K线上的类型化场景门控，并进行诚实风险盖章。"
+      },
+      "evidence": {
+        "en": "candles + ATR + deterministic scenario state",
+        "zh": "K线 + ATR + 确定性场景状态"
+      },
+      "steps": [
+        {
+          "id": "inputs",
+          "tone": "data",
+          "eyebrow": {
+            "en": "Inputs",
+            "zh": "输入"
+          },
+          "title": {
+            "en": "Market context",
+            "zh": "市场上下文"
+          },
+          "body": {
+            "en": "feed and volatility context are prepared first",
+            "zh": "先准备行情和波动率上下文"
+          },
+          "nodes": [
+            "feed",
+            "atr"
+          ]
+        },
+        {
+          "id": "stage1",
+          "tone": "stage",
+          "eyebrow": {
+            "en": "Stage 1",
+            "zh": "阶段一"
+          },
+          "title": {
+            "en": "Scenario diagnosis",
+            "zh": "场景诊断"
+          },
+          "body": {
+            "en": "the gate waits for a typed breakout setup instead of asking an LLM to improvise",
+            "zh": "门控等待类型化突破场景，而不是让 LLM 即兴判断"
+          },
+          "nodes": [
+            "scenario"
+          ]
+        },
+        {
+          "id": "stage2",
+          "tone": "stage",
+          "eyebrow": {
+            "en": "Stage 2",
+            "zh": "阶段二"
+          },
+          "title": {
+            "en": "Position sizing",
+            "zh": "仓位计算"
+          },
+          "body": {
+            "en": "accepted signal becomes a sized order candidate",
+            "zh": "通过的信号变成带仓位订单候选"
+          },
+          "nodes": [
+            "sizer"
+          ]
+        },
+        {
+          "id": "risk_gate",
+          "tone": "risk",
+          "eyebrow": {
+            "en": "Gate",
+            "zh": "门控"
+          },
+          "title": {
+            "en": "RiskGate stamp",
+            "zh": "RiskGate 盖章"
+          },
+          "body": {
+            "en": "execution remains impossible without a risk-stamped signal",
+            "zh": "没有风险盖章信号就无法执行"
+          },
+          "nodes": [
+            "risk"
+          ]
+        },
+        {
+          "id": "runtime",
+          "tone": "exec",
+          "eyebrow": {
+            "en": "Runtime",
+            "zh": "运行时"
+          },
+          "title": {
+            "en": "Execute / simulate",
+            "zh": "执行 / 模拟"
+          },
+          "body": {
+            "en": "the runtime only receives typed stamped orders",
+            "zh": "运行时只接收类型化盖章订单"
+          },
+          "nodes": [
+            "exec"
+          ]
+        }
+      ],
+      "sidecars": [
+        {
+          "id": "kill_switch",
+          "tone": "fail",
+          "title": {
+            "en": "Portfolio kill switch",
+            "zh": "组合熔断"
+          },
+          "body": {
+            "en": "drawdown guard short-circuits the strategy if losses exceed policy",
+            "zh": "如果损失超过策略，回撤保护会短路交易"
+          },
+          "nodes": [
+            "kill"
+          ]
+        }
+      ],
+      "invariant": {
+        "en": "Raw model or strategy output cannot enter execution until it passes position sizing and RiskGate stamping.",
+        "zh": "模型或策略的原始输出不能直接执行，必须先经过仓位计算和 RiskGate 盖章。"
+      }
+    }
   }
 }

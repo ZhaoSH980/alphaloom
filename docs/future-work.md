@@ -8,16 +8,17 @@ per-day plan Carryover sections (`docs/superpowers/plans/`).
 
 ## 1. Multi-market real-data ingestion
 
-Today every demo number comes from a **single synthetic instrument**
-(`BTC-USDT-SWAP`) on synthetic candles in `data/demo.sqlite`. The **`DataSource`
-abstraction is already in place** (and the OKX-demo broker is sketched), so the seam
-for real, multi-market data exists — it just isn't wired to a live feed. The spec
+Today the offline database mixes deterministic synthetic BTC/ETH candles with one
+selected real OKX `SOL-USDT-SWAP` smoke-test window. The **`DataSource` abstraction is
+already in place** (and the OKX-demo broker is sketched), so the seam for broader
+real, multi-market data exists — it just isn't wired to a live feed. The spec
 deliberately kept a single exchange (OKX demo) as the target and preserved the
 abstraction to prove extensibility rather than shipping ten half-working connectors.
 
 **Next:** connect a real OKX-demo market feed (and eventually additional
-instruments), then re-run the leaderboard and fidelity ladder against real market
-data to replace the synthetic-window caveats in `evaluation-methodology.md` §3.
+instruments), then re-run the leaderboard and fidelity ladder against larger real
+market samples to replace the demonstration-window caveats in
+`evaluation-methodology.md` §3.
 
 ## 2. Evolution lab — scale beyond the demonstration lock
 

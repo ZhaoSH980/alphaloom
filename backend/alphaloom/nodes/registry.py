@@ -27,6 +27,7 @@ class NodeDef:
     outputs: dict[str, PinType]
     params: dict[str, type] = field(default_factory=dict)
     cost: CostAnnotation = CostAnnotation()
+    optional_inputs: frozenset[str] = field(default_factory=frozenset)
     # 来源标记：True = 经 /api/nodes/custom 沙箱热注册的自定义节点（不受信）；
     # False = 进程内置节点（受信）。守门层据此不信任沙箱节点的成本证书自证
     # （沙箱节点可声明 llm_calls_per_bar=0 却运行期偷调 LLM——见 C1 修复），
@@ -39,12 +40,18 @@ REGISTRY: dict[str, NodeDef] = {}
 
 def node(*, type: str, category: str, inputs: dict, outputs: dict,
          params: dict | None = None, cost: CostAnnotation = CostAnnotation(),
+         optional_inputs: set[str] | frozenset[str] | tuple[str, ...] | list[str] | None = None,
          sandboxed: bool = False):
     def deco(cls):
         if type in REGISTRY:
             raise ValueError(f"node type {type!r} already registered")
+        optional = frozenset(optional_inputs or ())
+        unknown = optional - set(inputs)
+        if unknown:
+            raise ValueError(f"optional inputs not declared for {type!r}: {sorted(unknown)}")
         REGISTRY[type] = NodeDef(type, category, cls, dict(inputs), dict(outputs),
-                                 dict(params or {}), cost, sandboxed=sandboxed)
+                                 dict(params or {}), cost, optional,
+                                 sandboxed=sandboxed)
         cls.node_type = type
         return cls
     return deco

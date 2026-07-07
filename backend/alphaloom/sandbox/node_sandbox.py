@@ -100,6 +100,8 @@ SAFE_BUILTINS: dict[str, Any] = {
 
 # for range(...) 字面量上界。
 MAX_RANGE = 100_000
+MAX_LOOP_WORK = 1_000_000
+MAX_SEQUENCE_REPEAT = 1_000_000
 
 # 允许出现的 AST 节点类型白名单（其余一律拒）。
 _ALLOWED_NODES: tuple[type, ...] = (
@@ -191,6 +193,7 @@ class _Validator(ast.NodeVisitor):
         # 被重新赋成非常量则从表中移除（不敢假设其值），此时该名字作 range 上界会
         # 被当"未知上界"保守拒（见 _check_range）。
         self._const_ints: dict[str, int] = {}
+        self._loop_stack: list[int] = []
 
     def _eval_const_int(self, expr) -> int | None:
         """尝试把表达式在已知整数常量表上静态求值为 int，失败返回 None。
@@ -258,6 +261,84 @@ class _Validator(ast.NodeVisitor):
             # 名字被赋成未知（非整数 / 含未知量的算术）→ 其值未知，从常量表移除
             # （后续作 range 上界保守拒或放行，见 _check_range）
             self._const_ints.pop(target.id, None)
+
+    def _range_len(self, call: ast.Call) -> int | None:
+        if not (isinstance(call.func, ast.Name) and call.func.id == "range"):
+            return None
+        if call.keywords or len(call.args) not in (1, 2, 3):
+            return None
+        vals = [self._eval_const_int(arg) for arg in call.args]
+        if any(v is None for v in vals):
+            return None
+        if len(vals) == 1:
+            start, stop, step = 0, vals[0], 1
+        elif len(vals) == 2:
+            start, stop, step = vals[0], vals[1], 1
+        else:
+            start, stop, step = vals[0], vals[1], vals[2]
+        if step == 0:
+            return MAX_LOOP_WORK + 1
+        if step > 0:
+            if stop <= start:
+                return 0
+            return (stop - start + step - 1) // step
+        if stop >= start:
+            return 0
+        step_abs = -step
+        return (start - stop + step_abs - 1) // step_abs
+
+    def _iter_len(self, expr: ast.AST) -> int | None:
+        if isinstance(expr, ast.Call):
+            return self._range_len(expr)
+        if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+            return len(expr.elts)
+        if isinstance(expr, ast.Dict):
+            return len(expr.keys)
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, (str, bytes)):
+            return len(expr.value)
+        return None
+
+    def _push_loop_work(self, node_obj: ast.AST, count: int | None) -> bool:
+        if count is None:
+            return False
+        total = max(0, count)
+        for outer in self._loop_stack:
+            total *= max(0, outer)
+            if total > MAX_LOOP_WORK:
+                break
+        if total > MAX_LOOP_WORK:
+            _reject(
+                node_obj,
+                f"nested loop work {total} exceeds sandbox limit {MAX_LOOP_WORK}",
+                "loop_work",
+            )
+        self._loop_stack.append(max(0, count))
+        return True
+
+    def _sequence_literal_len(self, expr: ast.AST) -> int | None:
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, (str, bytes)):
+            return len(expr.value)
+        if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+            return len(expr.elts)
+        return None
+
+    def _check_sequence_repeat(self, node_obj: ast.BinOp) -> None:
+        left_len = self._sequence_literal_len(node_obj.left)
+        right_count = self._eval_const_int(node_obj.right)
+        right_len = self._sequence_literal_len(node_obj.right)
+        left_count = self._eval_const_int(node_obj.left)
+        if left_len is not None and right_count is not None:
+            total = left_len * max(0, right_count)
+        elif right_len is not None and left_count is not None:
+            total = right_len * max(0, left_count)
+        else:
+            return
+        if total > MAX_SEQUENCE_REPEAT:
+            _reject(
+                node_obj,
+                f"sequence repeat size {total} exceeds sandbox limit {MAX_SEQUENCE_REPEAT}",
+                "sequence_repeat",
+            )
 
     def visit_Assign(self, node_obj: ast.Assign) -> None:
         for tgt in node_obj.targets:
@@ -367,6 +448,11 @@ class _Validator(ast.NodeVisitor):
         self.generic_visit(node_obj)
 
     # ---- Call 白名单：func 是简单 Name 时须在允许内建 or 用户/import 名内 ----
+    def visit_BinOp(self, node_obj: ast.BinOp) -> None:
+        if isinstance(node_obj.op, ast.Mult):
+            self._check_sequence_repeat(node_obj)
+        self.generic_visit(node_obj)
+
     def visit_Call(self, node_obj: ast.Call) -> None:
         func = node_obj.func
         if isinstance(func, ast.Name):
@@ -385,6 +471,41 @@ class _Validator(ast.NodeVisitor):
         it = node_obj.iter
         if isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range":
             self._check_range(it)
+        pushed = self._push_loop_work(node_obj, self._iter_len(it))
+        try:
+            self.generic_visit(node_obj)
+        finally:
+            if pushed:
+                self._loop_stack.pop()
+
+    def _check_comprehension_work(self, node_obj, generators) -> None:
+        total = 1
+        for gen in generators:
+            count = self._iter_len(gen.iter)
+            if count is None:
+                return
+            total *= max(0, count)
+            if total > MAX_LOOP_WORK:
+                _reject(
+                    node_obj,
+                    f"comprehension work {total} exceeds sandbox limit {MAX_LOOP_WORK}",
+                    "loop_work",
+                )
+
+    def visit_ListComp(self, node_obj: ast.ListComp) -> None:
+        self._check_comprehension_work(node_obj, node_obj.generators)
+        self.generic_visit(node_obj)
+
+    def visit_SetComp(self, node_obj: ast.SetComp) -> None:
+        self._check_comprehension_work(node_obj, node_obj.generators)
+        self.generic_visit(node_obj)
+
+    def visit_DictComp(self, node_obj: ast.DictComp) -> None:
+        self._check_comprehension_work(node_obj, node_obj.generators)
+        self.generic_visit(node_obj)
+
+    def visit_GeneratorExp(self, node_obj: ast.GeneratorExp) -> None:
+        self._check_comprehension_work(node_obj, node_obj.generators)
         self.generic_visit(node_obj)
 
     def _check_range(self, call: ast.Call) -> None:

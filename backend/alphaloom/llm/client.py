@@ -20,6 +20,42 @@ OFFLINE_DEFAULTS = {
     "LLM_MODEL": "spark-x1",
 }
 
+LIVE_KEYS = ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
+
+
+class LLMConfigError(RuntimeError):
+    pass
+
+
+def _dotenv_candidates(dotenv_path: Path | None) -> list[Path]:
+    if dotenv_path is not None:
+        return [Path(dotenv_path)]
+    cwd = Path.cwd()
+    repo = Path(__file__).resolve().parents[3]
+    candidates = [
+        cwd / ".env",
+        cwd / "backend" / ".env",
+        repo / ".env",
+        repo / "backend" / ".env",
+    ]
+    unique = []
+    seen = set()
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved not in seen:
+            unique.append(path)
+            seen.add(resolved)
+    return unique
+
+
+def _load_dotenv_files(dotenv_path: Path | None,
+                       *, override: bool = False) -> list[Path]:
+    checked = _dotenv_candidates(dotenv_path)
+    for path in checked:
+        if path.is_file():
+            load_dotenv(path, override=override)
+    return checked
+
 
 class LLMConfig(BaseModel):
     base_url: str
@@ -27,14 +63,24 @@ class LLMConfig(BaseModel):
     model: str
 
     @classmethod
-    def from_env(cls, dotenv_path: Path | None = None) -> "LLMConfig":
-        load_dotenv(dotenv_path)  # repo-root .env by default
-        if os.environ.get("ALPHALOOM_OFFLINE", "") == "1":
+    def from_env(cls, dotenv_path: Path | None = None,
+                 offline: bool | None = None,
+                 dotenv_override: bool = False) -> "LLMConfig":
+        if offline is None:
+            offline = os.environ.get("ALPHALOOM_OFFLINE", "") == "1"
+        if offline:
             return cls(
-                base_url=os.environ.get("LLM_BASE_URL", OFFLINE_DEFAULTS["LLM_BASE_URL"]),
-                api_key=os.environ.get("LLM_API_KEY", OFFLINE_DEFAULTS["LLM_API_KEY"]),
-                model=os.environ.get("LLM_MODEL", OFFLINE_DEFAULTS["LLM_MODEL"]),
+                base_url=OFFLINE_DEFAULTS["LLM_BASE_URL"],
+                api_key=OFFLINE_DEFAULTS["LLM_API_KEY"],
+                model=OFFLINE_DEFAULTS["LLM_MODEL"],
             )
+        checked = _load_dotenv_files(dotenv_path, override=dotenv_override)
+        missing = [key for key in LIVE_KEYS if not os.environ.get(key)]
+        if missing:
+            paths = ", ".join(str(path) for path in checked)
+            raise LLMConfigError(
+                "live LLM mode is missing "
+                f"{', '.join(missing)}. Checked dotenv paths: {paths}")
         return cls(
             base_url=os.environ["LLM_BASE_URL"],
             api_key=os.environ["LLM_API_KEY"],

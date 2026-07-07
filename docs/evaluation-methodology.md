@@ -125,16 +125,17 @@ every row, so overfitting is exposed inline.
 
 **Current limitations — the leaderboard's evidence base is thin.**
 
-- **Single synthetic instrument.** Every number in the demo comes from one
-  instrument — `BTC-USDT-SWAP` — on **synthetic candle data** in `data/demo.sqlite`.
-  This is not real BTC market data.
+- **Small demonstration data.** The default offline database contains synthetic
+  BTC/ETH candles for deterministic tests plus a real OKX `SOL-USDT-SWAP` smoke
+  window used by the headline demo. The SOL window is real market history, but it is
+  still a selected smoke-test slice, not a broad research sample.
 - **Small windows.** Demo windows are on the order of tens to a few hundred 1-minute
   bars. This is nowhere near enough for a statistically meaningful edge claim.
-- **No cross-market / cross-regime robustness.** There is no test across multiple
-  instruments, multiple time periods, or different volatility regimes. "Beats the
-  baseline here" means "beats it on this one small synthetic window," nothing more.
+- **No cross-market / cross-regime robustness.** There is no test across many
+  instruments, many periods, or different volatility regimes. "Beats the baseline
+  here" means "beats it on this one small demonstration window," nothing more.
 
-Beating a brainless baseline on one small synthetic window is a *sanity check*, not
+Beating a brainless baseline on one small demonstration window is a *sanity check*, not
 evidence of alpha. The leaderboard is honest about *ranking* the contestants; it makes
 no claim that the winner would generalize.
 
@@ -170,7 +171,7 @@ that whatever the real recording shows gets displayed truthfully.
   the sign could flip.
 - **It measures correlation on that window, not a generalizable causal effect.**
   A negative `guardrail_value` (however large) does not mean "the risk officer is bad."
-  It means: *in this particular slice of this particular synthetic instrument, the
+  It means: *in this particular slice of this particular demonstration instrument, the
   officer's vetoes happened to land on trades that would have won.* Read the exact
   delta off the panel; don't read a verdict about risk officers into it.
 
@@ -251,13 +252,13 @@ in-sample numbers, brainless baselines the agent must beat, ablations that quant
 guardrail value with the sign reported either way, and an evolution loop that can't
 escape the compliance type system.
 
-**It is not** a source of tradeable alpha, a validated backtest of a real market, a
-statistically-significant study of anything, or a claim that any blueprint here would
-make money live. Single synthetic instrument, small windows, N = 1 causal claims,
-demonstration-scale search, mostly-synthetic recordings.
+**It is not** a source of tradeable alpha, a validated market study, a
+statistically-significant result, or a claim that any blueprint here would make money
+live. Small selected windows, N = 1 causal claims, demonstration-scale search,
+mostly-synthetic recordings.
 
 **The honesty is the deliverable.** A tool that told you it had found alpha on one
-small synthetic window would be lying, and lying is exactly the failure mode this whole
+small demo window would be lying, and lying is exactly the failure mode this whole
 system is built to detect.
 
 See also: [`demo-script.md`](demo-script.md) (the 10-minute walkthrough) and

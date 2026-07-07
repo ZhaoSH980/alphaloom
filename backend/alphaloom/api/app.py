@@ -13,41 +13,66 @@ from alphaloom.api.runs_store import RunsStore
 from alphaloom.api.schemas import (CompileIn, CopilotBlueprintIn, CopilotExplainIn,
                                    CopilotOptimizeIn, CustomNodeIn, EvalAblationIn,
                                    EvalFidelityIn, EvalLeaderboardIn, EvalScorecardIn,
-                                   EvolveIn, RunIn, SaveBlueprintIn)
+                                   EvolveIn, LiveStartIn, RunIn, RuntimeModeIn,
+                                   SaveBlueprintIn)
 from alphaloom.api.serialize import sanitize
+from alphaloom.api.live import LiveAnalysisStore, LiveService
 from alphaloom.api.service import RunService
 from alphaloom.copilot import blueprint as copilot
 from alphaloom.data.source import bar_to_ms
 from alphaloom.graph.compiler import compile_blueprint
 from alphaloom.graph.model import dumps_loom, loads_loom
+from alphaloom.llm.recording import ReplayMissError
 from alphaloom.nodes.registry import REGISTRY
 from alphaloom.runtime.recorder import from_json
 from alphaloom.sandbox.errors import SandboxError
 from alphaloom.sandbox.node_sandbox import compile_node_source
 
-_BARS = ["1m", "5m", "15m", "1H", "4H", "1D"]
+try:
+    from openai import OpenAIError
+    _OPENAI_ERROR_TYPES = (OpenAIError,)
+except Exception:  # pragma: no cover - openai is optional in some test installs
+    _OPENAI_ERROR_TYPES = ()
 
-def _build_llm_client(llm_db):
+_BARS = ["1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "6H", "12H", "1D"]
+_LAST_LLM_CONFIG_ERROR: str | None = None
+
+def _build_llm_client(llm_db, mode: str | None = None):
     """从 env 构建生产 RecordingLLMClient：LLMConfig.from_env + openai_transport
     + with_retry（429 退避），offline 跟 ALPHALOOM_OFFLINE。llm_db=None → data/llm_calls.sqlite。
 
     构建失败（如非 offline 且缺 .env 配置）返回 None——LLM 节点缺席的 D1/D2 蓝图照跑，
     LLM 节点在场时 ctx.llm is None 会抛清晰 RuntimeError → run failed（不崩服务）。
     """
-    from alphaloom.llm.client import LLMConfig, openai_transport
+    from alphaloom.llm.client import LLMConfig, LLMConfigError, openai_transport
     from alphaloom.llm.recording import RecordingLLMClient
     from alphaloom.llm.retry import with_retry
+    global _LAST_LLM_CONFIG_ERROR
+    _LAST_LLM_CONFIG_ERROR = None
     try:
-        cfg = LLMConfig.from_env()
-    except KeyError:
+        force_offline = None
+        if mode == "offline":
+            force_offline = True
+        elif mode == "live":
+            force_offline = False
+        cfg = LLMConfig.from_env(
+            offline=force_offline,
+            dotenv_override=(mode == "live"))
+    except LLMConfigError as exc:
+        _LAST_LLM_CONFIG_ERROR = str(exc)
         return None   # 未配置 .env 且非 offline —— 无 LLM 客户端（LLM 节点会 run failed）
     db = Path(llm_db) if llm_db is not None else Path("data") / "llm_calls.sqlite"
     db.parent.mkdir(parents=True, exist_ok=True)
     transport = with_retry(openai_transport(cfg))
-    return RecordingLLMClient(transport, db, model=cfg.model)
+    offline = None
+    if mode == "offline":
+        offline = True
+    elif mode == "live":
+        offline = False
+    return RecordingLLMClient(transport, db, model=cfg.model, offline=offline)
 
 def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_dir,
-               frontend_dist, llm_client=None, llm_db=None) -> FastAPI:
+               frontend_dist, llm_client=None, llm_db=None, live_fetcher=None) -> FastAPI:
     store = RunsStore(runs_db)
 
     @asynccontextmanager
@@ -87,11 +112,16 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         llm_client = _build_llm_client(llm_db)
     app.state.llm = llm_client
     service = RunService(store=store, db_path=db_path, record_dir=record_dir, llm=llm_client)
+    live_service = LiveService(store=store, db_path=db_path, record_dir=record_dir,
+                               llm=llm_client, candle_fetcher=live_fetcher)
     user_dir = Path(user_blueprints_dir)
     user_dir.mkdir(parents=True, exist_ok=True)
     app.state.service = service
+    app.state.live_service = live_service
     app.state.ws_queues = {}          # run_id -> list[asyncio.Queue]（Task 4 消费）
     app.state.event_log = {}          # run_id -> list[event]（重放缓冲，20k 上限）
+    app.state.live_ws_queues = {}     # session_id -> list[asyncio.Queue]
+    app.state.live_event_log = {}     # session_id -> list[event]
     app.state.loop = None             # lifespan startup 兜底抓；ws_run 内按连接覆盖
 
     def _sink_for(run_id):
@@ -102,6 +132,17 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             loop = app.state.loop
             if loop is not None:
                 for q in list(app.state.ws_queues.get(run_id, [])):
+                    loop.call_soon_threadsafe(q.put_nowait, event)
+        return sink
+
+    def _live_sink_for(session_id):
+        def sink(event):
+            log = app.state.live_event_log.setdefault(session_id, [])
+            if len(log) < 20_000:
+                log.append(event)
+            loop = app.state.loop
+            if loop is not None:
+                for q in list(app.state.live_ws_queues.get(session_id, [])):
                     loop.call_soon_threadsafe(q.put_nowait, event)
         return sink
 
@@ -119,8 +160,7 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
                         "cost": d.cost.__dict__})
         return sorted(out, key=lambda x: (x["category"], x["type"]))
 
-    @app.get("/api/status")
-    def status():
+    def _status_payload():
         # Honest runtime mode for the header readout: is the LLM handle a
         # zero-quota offline replay, a live real endpoint, or absent entirely?
         llm = app.state.llm
@@ -131,6 +171,31 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         else:
             mode = "live"          # real endpoint — real calls burn real quota
         return {"llm_mode": mode, "model": getattr(llm, "model", None)}
+
+    @app.get("/api/status")
+    def status():
+        return _status_payload()
+
+    @app.post("/api/runtime-mode")
+    def runtime_mode(body: RuntimeModeIn):
+        if body.mode == "none":
+            llm = None
+        else:
+            llm = _build_llm_client(llm_db, mode=body.mode)
+            if llm is None:
+                if body.mode == "live":
+                    raise HTTPException(
+                        422,
+                        _LAST_LLM_CONFIG_ERROR
+                        or "live mode requires LLM_BASE_URL, LLM_API_KEY, and "
+                           "LLM_MODEL in the server .env or environment")
+                raise HTTPException(
+                    422,
+                    "offline replay mode could not create a recording client")
+        app.state.llm = llm
+        app.state.service.set_llm(llm)
+        app.state.live_service.set_llm(llm)
+        return _status_payload()
 
     @app.post("/api/compile")
     def compile_ep(body: CompileIn):
@@ -149,8 +214,11 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
                 "certificate": sanitize(r.certificate.to_dict()) if r.certificate else None,
                 "order": r.order}
 
-    def _iter_blueprints():
-        for src, folder in (("preset", Path(blueprints_dir)), ("user", user_dir)):
+    def _iter_blueprints(include_user: bool = True):
+        folders = [("preset", Path(blueprints_dir))]
+        if include_user:
+            folders.append(("user", user_dir))
+        for src, folder in folders:
             if not folder.exists():
                 continue
             for f in sorted(folder.glob("*.loom")):
@@ -162,14 +230,21 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
 
     @app.get("/api/blueprints")
     def blueprints_list():
-        return [{"id": raw["id"], "name": raw.get("name", raw["id"]),
-                 "meta": raw.get("meta", {}), "source": src}
-                for src, _f, raw in _iter_blueprints()]
+        out = []
+        seen = set()
+        for src, _f, raw in _iter_blueprints():
+            bp_id = raw.get("id")
+            if not bp_id or bp_id in seen:
+                continue
+            seen.add(bp_id)
+            out.append({"id": bp_id, "name": raw.get("name", bp_id),
+                        "meta": raw.get("meta", {}), "source": src})
+        return out
 
     @app.get("/api/blueprints/{bp_id}")
     def blueprint_get(bp_id: str):
         for _src, _f, raw in _iter_blueprints():
-            if raw["id"] == bp_id:
+            if raw.get("id") == bp_id:
                 return raw
         raise HTTPException(404, "blueprint not found")
 
@@ -182,6 +257,11 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         slug = re.sub(r"[^a-z0-9_-]", "", bp.id.lower())[:64]
         if not slug:
             raise HTTPException(422, "blueprint id yields empty slug")
+        preset_ids = {raw.get("id") for _src, _f, raw in _iter_blueprints(include_user=False)}
+        if slug in preset_ids:
+            raise HTTPException(
+                409,
+                f"blueprint id {slug!r} is reserved by a preset; choose a new id")
         data = dict(body.blueprint, id=slug)
         (user_dir / f"{slug}.loom").write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -205,6 +285,15 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         finally:
             src.close()
 
+    @app.get("/api/market/catalog")
+    def market_catalog():
+        from alphaloom.data.sqlite_source import SQLiteMarketData
+        src = SQLiteMarketData(db_path)
+        try:
+            return src.catalog()
+        finally:
+            src.close()
+
     @app.post("/api/runs")
     def run_start(body: RunIn):
         if body.bar not in _BARS:
@@ -220,8 +309,51 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         params = body.model_dump(exclude={"blueprint"})
         import uuid as _uuid
         run_id = _uuid.uuid4().hex[:12]          # 两段式：先定 run_id 再构造 sink
-        service.start(bp, params, sink=_sink_for(run_id), run_id=run_id)
+        try:
+            service.start(bp, params, sink=_sink_for(run_id), run_id=run_id)
+        except RuntimeError as exc:
+            raise HTTPException(429, str(exc))
         return {"run_id": run_id}
+
+    @app.post("/api/live")
+    def live_start(body: LiveStartIn):
+        if body.bar not in _BARS:
+            raise HTTPException(422, f"bar must be one of {_BARS}")
+        try:
+            bp = loads_loom(json.dumps(body.blueprint))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(422, {"errors": [{"code": "PARAM_INVALID",
+                                                  "message": str(exc)}]})
+        r = compile_blueprint(bp, bars_per_day=86_400_000 // bar_to_ms(body.bar))
+        if not r.ok:
+            raise HTTPException(422, {"errors": [e.to_dict() for e in r.errors]})
+        import uuid as _uuid
+        session_id = _uuid.uuid4().hex[:12]
+        params = body.model_dump(exclude={"blueprint"})
+        try:
+            app.state.live_service.start(
+                bp, params, sink=_live_sink_for(session_id), session_id=session_id)
+        except RuntimeError as exc:
+            raise HTTPException(429, str(exc))
+        return {"session_id": session_id, "run_id": session_id}
+
+    @app.post("/api/live/{session_id}/stop")
+    def live_stop(session_id: str):
+        stopped = app.state.live_service.command(session_id, "stop")
+        if not stopped and not app.state.live_service.has(session_id):
+            raise HTTPException(404, "live session not found")
+        return {"session_id": session_id, "status": "stopping" if stopped else "not_active"}
+
+    @app.get("/api/live/{session_id}/analysis")
+    def live_analysis(session_id: str, limit: int = 200):
+        row = store.get(session_id)
+        if row is None or not row["recording_path"]:
+            raise HTTPException(404, "live session or recording not found")
+        analysis = LiveAnalysisStore(row["recording_path"])
+        try:
+            return analysis.list(session_id, limit=limit)
+        finally:
+            analysis.close()
 
     @app.get("/api/runs")
     def runs_list():
@@ -277,6 +409,21 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
                      "in .env or ALPHALOOM_OFFLINE=1 with recorded calls")
         return llm
 
+    def _raise_llm_http_error(exc: Exception):
+        if isinstance(exc, ReplayMissError):
+            raise HTTPException(
+                422,
+                {"error": "offline_replay_miss",
+                 "message": str(exc),
+                 "hint": "Switch to Live mode, or record this exact Copilot prompt before using offline replay."})
+        if _OPENAI_ERROR_TYPES and isinstance(exc, _OPENAI_ERROR_TYPES):
+            raise HTTPException(
+                502,
+                {"error": "llm_connection_failed",
+                 "message": str(exc),
+                 "hint": "The LLM client is configured, but the server could not reach the provider."})
+        raise exc
+
     # —— Copilot 元 Agent 端点（Text-to-Blueprint / explain / optimize）——
     @app.post("/api/copilot/blueprint")
     def copilot_blueprint(body: CopilotBlueprintIn):
@@ -286,11 +433,16 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             return copilot.text_to_blueprint(body.nl, REGISTRY, llm)
         except copilot.BlueprintGenerationError as exc:
             raise HTTPException(422, {"error": "generation_failed", "message": str(exc)})
+        except Exception as exc:  # noqa: BLE001 - known transport failures become API errors
+            _raise_llm_http_error(exc)
 
     @app.post("/api/copilot/explain")
     def copilot_explain(body: CopilotExplainIn):
         llm = _require_llm()
-        return {"explanation": copilot.explain(body.blueprint, llm)}
+        try:
+            return {"explanation": copilot.explain(body.blueprint, llm)}
+        except Exception as exc:  # noqa: BLE001 - known transport failures become API errors
+            _raise_llm_http_error(exc)
 
     @app.post("/api/copilot/optimize")
     def copilot_optimize(body: CopilotOptimizeIn):
@@ -299,6 +451,8 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             return copilot.optimize(body.blueprint, body.report, llm, defs=REGISTRY)
         except copilot.BlueprintGenerationError as exc:
             raise HTTPException(422, {"error": "generation_failed", "message": str(exc)})
+        except Exception as exc:  # noqa: BLE001 - known transport failures become API errors
+            _raise_llm_http_error(exc)
 
     # —— 评估 / 进化端点（D4-T6）——
     #
@@ -337,6 +491,16 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
     def _llm_quota_safe() -> bool:
         """当前 llm 客户端是否零配额安全（offline 录制回放 / 本地剧本）。"""
         return getattr(app.state.llm, "offline", False) is True
+
+    def _guard_demo_recordings():
+        count_fn = getattr(app.state.llm, "recording_count", None)
+        if callable(count_fn) and count_fn() == 0:
+            raise HTTPException(
+                422,
+                {"error": "recording_seed_missing",
+                 "message": "offline demo mode needs recorded LLM calls, but the "
+                            "configured recording database is empty. Re-run the "
+                            "demo in record mode to capture seed calls."})
 
     def _guard_llm_blueprint(compiled):
         """LLM 蓝图（或含不受信沙箱节点的蓝图）须 offline 客户端；否则 409
@@ -473,6 +637,7 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         # demo=True：离线 demo 预设——服务端硬用规范 demo 坐标（demo_coords，与种子录制
         # 逐字同源），忽略请求体 blueprint/inst/窗口，杜绝前端传错 → 离线命中种子回放。
         if body.demo:
+            _guard_demo_recordings()
             bp = _load_demo_blueprint(_dc.DEMO_ABLATION_BLUEPRINT_ID)
             inst, bar = _dc.DEMO_INST, _dc.DEMO_BAR
             start_ms, end_ms = _dc.DEMO_ABLATION_START_MS, _dc.DEMO_ABLATION_END_MS
@@ -529,6 +694,7 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         # demo=True：离线 demo 预设——服务端硬用规范 demo 坐标（demo_coords，与种子录制
         # 逐字同源），忽略请求体 blueprint/inst/窗口/规模，杜绝前端传错 → 命中种子回放。
         if body.demo:
+            _guard_demo_recordings()
             bp = _load_demo_blueprint(_dc.DEMO_EVOLVE_BLUEPRINT_ID)
             inst, bar = _dc.DEMO_INST, _dc.DEMO_BAR
             train_window, valid_window = _dc.DEMO_EVOLVE_TRAIN, _dc.DEMO_EVOLVE_VALID
@@ -637,6 +803,42 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
         finally:
             app.state.ws_queues.get(run_id, []).remove(q)
 
+    @app.websocket("/ws/live/{session_id}")
+    async def ws_live(ws: WebSocket, session_id: str):
+        await ws.accept()
+        app.state.loop = asyncio.get_running_loop()
+        if not app.state.live_service.has(session_id):
+            await ws.close(code=4404)
+            return
+        q: asyncio.Queue = asyncio.Queue()
+        app.state.live_ws_queues.setdefault(session_id, []).append(q)
+        try:
+            for ev in list(app.state.live_event_log.get(session_id, [])):
+                await ws.send_json(ev)
+            while True:
+                recv = asyncio.create_task(ws.receive_json())
+                pull = asyncio.create_task(q.get())
+                done_set, pending = await asyncio.wait(
+                    {recv, pull}, return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+                if recv in done_set:
+                    try:
+                        msg = recv.result()
+                    except Exception:
+                        break
+                    if msg.get("cmd") == "stop":
+                        app.state.live_service.command(session_id, "stop")
+                if pull in done_set:
+                    ev = pull.result()
+                    await ws.send_json(ev)
+                    if ev["type"] in ("done", "error"):
+                        break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            app.state.live_ws_queues.get(session_id, []).remove(q)
+
     # SPA fallback（/api /ws 之外）
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
@@ -650,7 +852,7 @@ def create_app(*, db_path, runs_db, record_dir, blueprints_dir, user_blueprints_
             return FileResponse(candidate)
         index = dist / "index.html"
         if index.is_file():
-            return FileResponse(index)
+            return FileResponse(index, headers={"Cache-Control": "no-store"})
         return JSONResponse({"hint": "frontend not built; run npm run build"}, status_code=200)
 
     return app

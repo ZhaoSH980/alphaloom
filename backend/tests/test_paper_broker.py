@@ -1,3 +1,5 @@
+import pytest
+
 from alphaloom.brokers.base import Order
 from alphaloom.brokers.paper import PaperBroker
 
@@ -59,3 +61,29 @@ def test_reversal_resets_avg_price():
     p = b.position()
     assert p.qty == -1.0 and p.avg_price == 12.0
     assert b.summary()["num_trades"] == 1        # 只有平掉的 2 手计一笔往返
+
+def test_partial_close_allocates_entry_and_exit_fees_proportionally():
+    b = PaperBroker(initial_cash=10_000.0, fee_rate=0.01)
+    b.on_bar(_bar(0, 100, 100, 100, 100))
+    b.submit(Order(side="buy", qty=10.0))
+    b.on_bar(_bar(60_000, 100, 100, 100, 100))
+    b.submit(Order(side="sell", qty=4.0))
+    b.on_bar(_bar(120_000, 110, 110, 110, 110))
+
+    assert b.position().qty == 6.0
+    assert b.closed_trades[-1]["pnl"] == pytest.approx(31.6)
+    assert b._entry_cost == pytest.approx(6.0)
+
+
+def test_reversal_splits_close_and_new_entry_fees():
+    b = PaperBroker(initial_cash=10_000.0, fee_rate=0.01)
+    b.on_bar(_bar(0, 100, 100, 100, 100))
+    b.submit(Order(side="buy", qty=10.0))
+    b.on_bar(_bar(60_000, 100, 100, 100, 100))
+    b.submit(Order(side="sell", qty=15.0))
+    b.on_bar(_bar(120_000, 110, 110, 110, 110))
+
+    p = b.position()
+    assert p.qty == -5.0 and p.avg_price == 110.0
+    assert b.closed_trades[-1]["pnl"] == pytest.approx(79.0)
+    assert b._entry_cost == pytest.approx(5.5)

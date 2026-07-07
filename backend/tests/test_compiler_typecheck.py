@@ -94,6 +94,15 @@ def test_dup_input_port_rejected():
     err = [e for e in r.errors if e.code == "DUP_INPUT"][0]
     assert err.node_id == "risk" and err.port == "signal"
 
+def test_missing_required_input_rejected():
+    r = compile_blueprint(_bp([
+        {"from": "feed.out", "to": "brain.candle"},
+        {"from": "risk.stamped", "to": "ex.signal"},
+    ]))
+    assert not r.ok
+    err = [e for e in r.errors if e.code == "MISSING_INPUT"][0]
+    assert err.node_id == "risk" and err.port == "signal"
+
 def test_canonical_order_is_declaration_invariant():
     a = loads_loom(json.dumps({
         "id": "t", "name": "t",

@@ -48,6 +48,11 @@ class RecordingLLMClient:
         )
         self._conn.commit()
 
+    def recording_count(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()
+        return int(row[0]) if row else 0
+
     @staticmethod
     def _key(request: dict[str, Any]) -> str:
         canonical = json.dumps(request, sort_keys=True, ensure_ascii=False)

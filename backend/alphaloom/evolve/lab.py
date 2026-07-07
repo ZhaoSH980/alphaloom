@@ -308,7 +308,7 @@ def _mutate_child(parent: _Individual, child_id: str, gen: int, llm, defs,
     last_bp_json: dict | None = None
 
     for attempt in range(1 + MAX_REPAIR_RETRIES):
-        response = llm.chat(messages, temperature=temperature)
+        response = llm.chat(messages, temperature=temperature, max_tokens=2048)
         raw = _content(response)
         patch = _extract_json(raw)
         if patch is None:

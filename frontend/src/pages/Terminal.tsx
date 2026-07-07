@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import CandleChart, { type Candle, type Fill } from "../components/CandleChart";
 import EquityChart from "../components/EquityChart";
+import RunPicker, { type RunPickerItem } from "../components/RunPicker";
 import SummaryCards from "../components/SummaryCards";
 import TradesTable from "../components/TradesTable";
 import { getCandles, getRun, getTrace, listRuns } from "../lib/api";
@@ -9,11 +10,6 @@ import { parseInsights, VERDICT_META,
          type CommitteeRole, type RunInsights, type TraceRow } from "../lib/insights";
 import { inferCommitteeRole } from "../lib/eval";
 import { useLang } from "../lib/i18n";
-
-const BADGE: Record<string, string> = {
-  completed: "bg-loom-green/20 text-loom-green", failed: "bg-loom-red/20 text-loom-red",
-  halted: "bg-loom-amber/20 text-loom-amber", running: "bg-loom-blue/20 text-loom-blue",
-};
 
 // —— 单个委员会角色卡：展示解析后的角色 JSON 对象（dict）字段 ——
 // 后端 committee_trace 是 list[dict]：策略师 {side,rationale,confidence} /
@@ -183,15 +179,12 @@ export default function Terminal() {
   if (!runs.length) return <div className="p-10 text-slate-500">{t("noRuns")}</div>;
   return (
     <div className="h-full overflow-auto p-3 space-y-3">
-      <div className="flex gap-2 flex-wrap">
-        {runs.map((r) => (
-          <button key={r.run_id} onClick={() => setSel(r.run_id)}
-                  className={`px-2 py-1 rounded text-xs font-mono border ${sel === r.run_id
-                    ? "border-loom-gold text-loom-gold" : "border-edge text-slate-400"}`}>
-            …{r.run_id.slice(-6)} · {r.blueprint_id}
-            <span className={`ml-2 px-1.5 rounded ${BADGE[r.status] ?? ""}`}>{r.status}</span>
-          </button>))}
-      </div>
+      <RunPicker
+        runs={runs as RunPickerItem[]}
+        selectedId={sel}
+        label={t("run")}
+        onSelect={setSel}
+      />
       {run?.status === "failed" && (
         <div className="panel p-3 border-loom-red/60 text-xs text-loom-red font-mono">
           {String(run.error)}

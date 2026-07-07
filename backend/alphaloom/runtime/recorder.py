@@ -15,17 +15,24 @@ def to_json(obj: dict) -> str:
 class Recorder:
     def __init__(self, path):
         self._db = sqlite3.connect(str(path))
+        self._closed = False
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS node_io ("
             " run_id TEXT, event_idx INTEGER, ts INTEGER, node_id TEXT,"
             " inputs_json TEXT, outputs_json TEXT)")
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_node_io ON node_io(run_id, node_id, event_idx)")
+        self._db.commit()
 
     def record(self, run_id, event_idx, ts, node_id, inputs, outputs):
         self._db.execute("INSERT INTO node_io VALUES (?,?,?,?,?,?)",
                          (run_id, event_idx, ts, node_id, to_json(inputs), to_json(outputs)))
-        self._db.commit()
+
+    def flush(self):
+        if not self._closed:
+            self._db.commit()
 
     def fetch(self, run_id, node_id=None):
         q = "SELECT * FROM node_io WHERE run_id=?"
@@ -39,7 +46,11 @@ class Recorder:
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def close(self):
+        if self._closed:
+            return
+        self._db.commit()
         self._db.close()
+        self._closed = True
 
 def from_json(text: str) -> dict:
     def hook(d):

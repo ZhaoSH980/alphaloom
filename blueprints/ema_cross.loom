@@ -2,29 +2,255 @@
   "id": "ema_cross_v1",
   "name": "EMA Cross Trend Follow",
   "nodes": [
-    {"id": "feed", "type": "candle_feed", "params": {"inst": "BTC-USDT-SWAP", "bar": "1m"}},
-    {"id": "ema_fast", "type": "ema", "params": {"period": 12}},
-    {"id": "ema_slow", "type": "ema", "params": {"period": 26}},
-    {"id": "atr", "type": "atr", "params": {"period": 14}},
-    {"id": "cross", "type": "cross_signal", "params": {"atr_mult": 2.0}},
-    {"id": "sizer", "type": "position_sizer", "params": {"risk_pct": 0.02}},
-    {"id": "risk", "type": "risk_gate", "params": {"max_qty": 100.0, "require_stop": true}},
-    {"id": "exec", "type": "execute_order", "params": {}},
-    {"id": "kill", "type": "kill_switch", "params": {"max_drawdown_pct": 0.25}}
+    {
+      "id": "feed",
+      "type": "candle_feed",
+      "params": {
+        "inst": "BTC-USDT-SWAP",
+        "bar": "1m"
+      }
+    },
+    {
+      "id": "ema_fast",
+      "type": "ema",
+      "params": {
+        "period": 12
+      }
+    },
+    {
+      "id": "ema_slow",
+      "type": "ema",
+      "params": {
+        "period": 26
+      }
+    },
+    {
+      "id": "atr",
+      "type": "atr",
+      "params": {
+        "period": 14
+      }
+    },
+    {
+      "id": "cross",
+      "type": "cross_signal",
+      "params": {
+        "atr_mult": 2
+      }
+    },
+    {
+      "id": "sizer",
+      "type": "position_sizer",
+      "params": {
+        "risk_pct": 0.02
+      }
+    },
+    {
+      "id": "risk",
+      "type": "risk_gate",
+      "params": {
+        "max_qty": 100,
+        "require_stop": true
+      }
+    },
+    {
+      "id": "exec",
+      "type": "execute_order",
+      "params": {}
+    },
+    {
+      "id": "kill",
+      "type": "kill_switch",
+      "params": {
+        "max_drawdown_pct": 0.25
+      }
+    }
   ],
   "edges": [
-    {"from": "feed.out", "to": "ema_fast.candle"},
-    {"from": "feed.out", "to": "ema_slow.candle"},
-    {"from": "feed.out", "to": "atr.candle"},
-    {"from": "ema_fast.value", "to": "cross.fast"},
-    {"from": "ema_slow.value", "to": "cross.slow"},
-    {"from": "feed.out", "to": "cross.candle"},
-    {"from": "atr.value", "to": "cross.atr"},
-    {"from": "cross.signal", "to": "sizer.signal"},
-    {"from": "feed.out", "to": "sizer.candle"},
-    {"from": "sizer.sized", "to": "risk.signal"},
-    {"from": "risk.stamped", "to": "exec.signal"},
-    {"from": "feed.out", "to": "kill.candle"}
+    {
+      "from": "feed.out",
+      "to": "ema_fast.candle"
+    },
+    {
+      "from": "feed.out",
+      "to": "ema_slow.candle"
+    },
+    {
+      "from": "feed.out",
+      "to": "atr.candle"
+    },
+    {
+      "from": "ema_fast.value",
+      "to": "cross.fast"
+    },
+    {
+      "from": "ema_slow.value",
+      "to": "cross.slow"
+    },
+    {
+      "from": "feed.out",
+      "to": "cross.candle"
+    },
+    {
+      "from": "atr.value",
+      "to": "cross.atr"
+    },
+    {
+      "from": "cross.signal",
+      "to": "sizer.signal"
+    },
+    {
+      "from": "feed.out",
+      "to": "sizer.candle"
+    },
+    {
+      "from": "sizer.sized",
+      "to": "risk.signal"
+    },
+    {
+      "from": "risk.stamped",
+      "to": "exec.signal"
+    },
+    {
+      "from": "feed.out",
+      "to": "kill.candle"
+    }
   ],
-  "meta": {"preset": true, "description_zh": "EMA 金叉死叉趋势跟随（止损=ATR×2，风险额 2%）"}
+  "meta": {
+    "preset": true,
+    "description_zh": "EMA 金叉死叉趋势跟随（止损=ATR×2，风险额 2%）",
+    "gateProtocol": {
+      "title": {
+        "en": "EMA cross gate blueprint",
+        "zh": "EMA 交叉门控蓝图"
+      },
+      "subtitle": {
+        "en": "A compact deterministic trend-following blueprint: typed signal, sizing, RiskGate, execution.",
+        "zh": "紧凑的确定性趋势跟随蓝图：类型化信号、仓位计算、RiskGate、执行。"
+      },
+      "evidence": {
+        "en": "candles + ATR + deterministic scenario state",
+        "zh": "K线 + ATR + 确定性场景状态"
+      },
+      "steps": [
+        {
+          "id": "inputs",
+          "tone": "data",
+          "eyebrow": {
+            "en": "Inputs",
+            "zh": "输入"
+          },
+          "title": {
+            "en": "Market context",
+            "zh": "市场上下文"
+          },
+          "body": {
+            "en": "feed and volatility context are prepared first",
+            "zh": "先准备行情和波动率上下文"
+          },
+          "nodes": [
+            "feed",
+            "atr"
+          ]
+        },
+        {
+          "id": "stage1",
+          "tone": "stage",
+          "eyebrow": {
+            "en": "Stage 1",
+            "zh": "阶段一"
+          },
+          "title": {
+            "en": "Scenario diagnosis",
+            "zh": "场景诊断"
+          },
+          "body": {
+            "en": "the gate waits for a typed breakout setup instead of asking an LLM to improvise",
+            "zh": "门控等待类型化突破场景，而不是让 LLM 即兴判断"
+          },
+          "nodes": [
+            "cross"
+          ]
+        },
+        {
+          "id": "stage2",
+          "tone": "stage",
+          "eyebrow": {
+            "en": "Stage 2",
+            "zh": "阶段二"
+          },
+          "title": {
+            "en": "Position sizing",
+            "zh": "仓位计算"
+          },
+          "body": {
+            "en": "accepted signal becomes a sized order candidate",
+            "zh": "通过的信号变成带仓位订单候选"
+          },
+          "nodes": [
+            "sizer"
+          ]
+        },
+        {
+          "id": "risk_gate",
+          "tone": "risk",
+          "eyebrow": {
+            "en": "Gate",
+            "zh": "门控"
+          },
+          "title": {
+            "en": "RiskGate stamp",
+            "zh": "RiskGate 盖章"
+          },
+          "body": {
+            "en": "execution remains impossible without a risk-stamped signal",
+            "zh": "没有风险盖章信号就无法执行"
+          },
+          "nodes": [
+            "risk"
+          ]
+        },
+        {
+          "id": "runtime",
+          "tone": "exec",
+          "eyebrow": {
+            "en": "Runtime",
+            "zh": "运行时"
+          },
+          "title": {
+            "en": "Execute / simulate",
+            "zh": "执行 / 模拟"
+          },
+          "body": {
+            "en": "the runtime only receives typed stamped orders",
+            "zh": "运行时只接收类型化盖章订单"
+          },
+          "nodes": [
+            "exec"
+          ]
+        }
+      ],
+      "sidecars": [
+        {
+          "id": "kill_switch",
+          "tone": "fail",
+          "title": {
+            "en": "Portfolio kill switch",
+            "zh": "组合熔断"
+          },
+          "body": {
+            "en": "drawdown guard short-circuits the strategy if losses exceed policy",
+            "zh": "如果损失超过策略，回撤保护会短路交易"
+          },
+          "nodes": [
+            "kill"
+          ]
+        }
+      ],
+      "invariant": {
+        "en": "Raw model or strategy output cannot enter execution until it passes position sizing and RiskGate stamping.",
+        "zh": "模型或策略的原始输出不能直接执行，必须先经过仓位计算和 RiskGate 盖章。"
+      }
+    }
+  }
 }

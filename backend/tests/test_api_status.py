@@ -38,3 +38,86 @@ def test_status_live_flags_real_endpoint(tmp_path):
     about being a zero-quota replay."""
     c = TestClient(_app(tmp_path, _rec(tmp_path, False)))
     assert c.get("/api/status").json()["llm_mode"] == "live"
+
+
+def test_runtime_mode_can_switch_to_none(tmp_path):
+    c = TestClient(_app(tmp_path, _rec(tmp_path, True)))
+
+    r = c.post("/api/runtime-mode", json={"mode": "none"})
+
+    assert r.status_code == 200
+    assert r.json() == {"llm_mode": "none", "model": None}
+    assert c.app.state.llm is None
+    assert c.app.state.service.llm is None
+
+
+def test_runtime_mode_can_switch_to_live_with_configured_client(tmp_path, monkeypatch):
+    live = _rec(tmp_path, False)
+
+    def build(_db, mode=None):
+        assert mode == "live"
+        return live
+
+    monkeypatch.setattr("alphaloom.api.app._build_llm_client", build)
+    c = TestClient(_app(tmp_path, _rec(tmp_path, True)))
+
+    r = c.post("/api/runtime-mode", json={"mode": "live"})
+
+    assert r.status_code == 200
+    assert r.json() == {"llm_mode": "live", "model": "astron-code-latest"}
+    assert c.app.state.llm is live
+    assert c.app.state.service.llm is live
+
+
+def test_runtime_mode_live_without_config_is_422_and_keeps_current(tmp_path, monkeypatch):
+    current = _rec(tmp_path, True)
+
+    def build(_db, mode=None):
+        assert mode == "live"
+        return None
+
+    monkeypatch.setattr("alphaloom.api.app._build_llm_client", build)
+    c = TestClient(_app(tmp_path, current))
+
+    r = c.post("/api/runtime-mode", json={"mode": "live"})
+
+    assert r.status_code == 422
+    assert "LLM_BASE_URL" in r.text
+    assert c.get("/api/status").json()["llm_mode"] == "offline"
+    assert c.app.state.llm is current
+    assert c.app.state.service.llm is current
+
+
+def test_runtime_mode_live_error_reports_dotenv_paths(tmp_path, monkeypatch):
+    for key in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "alphaloom.llm.client._dotenv_candidates",
+        lambda dotenv_path: [tmp_path / ".env", tmp_path / "backend" / ".env"])
+    current = _rec(tmp_path, True)
+    c = TestClient(_app(tmp_path, current))
+
+    r = c.post("/api/runtime-mode", json={"mode": "live"})
+
+    assert r.status_code == 422
+    assert "Checked dotenv paths" in r.text
+    assert ".env" in r.text
+    assert c.app.state.llm is current
+
+
+def test_runtime_mode_can_switch_to_offline_even_after_live(tmp_path, monkeypatch):
+    offline = _rec(tmp_path, True)
+
+    def build(_db, mode=None):
+        assert mode == "offline"
+        return offline
+
+    monkeypatch.setattr("alphaloom.api.app._build_llm_client", build)
+    c = TestClient(_app(tmp_path, _rec(tmp_path, False)))
+
+    r = c.post("/api/runtime-mode", json={"mode": "offline"})
+
+    assert r.status_code == 200
+    assert r.json()["llm_mode"] == "offline"
+    assert c.app.state.service.llm is offline
